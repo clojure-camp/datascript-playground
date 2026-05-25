@@ -115,8 +115,12 @@
   (doseq [{:keys [id]} (:cells @repl-state)]
     (eval-cell! id)))
 
-(defn add-cell! []
-  (swap! repl-state update :cells conj (new-cell)))
+(defn- ensure-trailing-blank! []
+  (swap! repl-state update :cells
+         (fn [cells]
+           (if (empty? (:code (last cells)))
+             cells
+             (conj cells (new-cell))))))
 
 (defn load-example-set! [set-id]
   (if (nil? set-id)
@@ -125,7 +129,8 @@
                            (filter (fn [s] (= (:id s) set-id)))
                            first)
           cells (mapv (fn [{:keys [label code]}] (new-cell (str ";; " label "\n" code))) (:examples example-set))]
-      (swap! repl-state assoc :cells cells))))
+      (swap! repl-state assoc :cells cells)))
+  (ensure-trailing-blank!))
 
 ;; -- Styles --
 
@@ -341,7 +346,8 @@
       {:value code
        :on-change (fn [e]
                     (swap! repl-state update :cells update-cell id
-                           #(assoc % :code (.. e -target -value))))
+                           #(assoc % :code (.. e -target -value)))
+                    (ensure-trailing-blank!))
        :on-key-down (fn [e]
                       (when (and (.-metaKey e) (= (.-key e) "Enter"))
                         (.preventDefault e)
@@ -447,18 +453,7 @@
           :font-size "12px"
           :font-weight "500"
           :cursor "pointer"}}
-        "Run All"]
-       [:button
-        {:on-click (fn [_] (add-cell!))
-         :style
-         {:background "white"
-          :color "#374151"
-          :border "1px solid #d1d5db"
-          :border-radius "6px"
-          :padding "5px 12px"
-          :font-size "12px"
-          :cursor "pointer"}}
-        "+ Cell"]]]
+        "Run All"]]]
      [:div
       {:style
        {:display "grid"
