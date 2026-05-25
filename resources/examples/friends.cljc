@@ -1,0 +1,54 @@
+
+;; Initialize schema
+(reset! conn
+        (d/create-conn {:person/friend
+                        {:db/cardinality :db.cardinality/many
+                         :db/valueType :db.type/ref}}))
+
+;; Seed data
+(d/transact! @conn
+             [{:db/id -1
+               :person/name "Alice"
+               :person/age 30}
+              {:db/id -2
+               :person/name "Bob"
+               :person/age 25}
+              {:db/id -3
+               :person/name "Charlie"
+               :person/age 35}
+              {:db/id -1
+               :person/friend -2}
+              {:db/id -1
+               :person/friend -3}])
+
+;; Names & ages
+(d/q '[:find ?e ?name ?age
+       :where
+       [?e :person/name ?name]
+       [?e :person/age ?age]]
+     (d/db @conn))
+
+;; Pull *
+(d/pull (d/db @conn) '[*] 1)
+
+;; All datoms
+(seq (d/datoms (d/db @conn) :eavt))
+
+;; Entity lookup
+(d/entity (d/db @conn) 1)
+
+;; Friends of Alice
+(d/q '[:find ?name
+       :where
+       [1 :person/friend ?f]
+       [?f :person/name ?name]]
+     (d/db @conn))
+
+;; Add person
+(d/transact! @conn
+             [{:person/name "Dave"
+               :person/age 28}])
+
+;; Retract attr
+(d/transact! @conn
+             [[:db/retract 2 :person/age 25]])
