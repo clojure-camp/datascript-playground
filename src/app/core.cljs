@@ -1,43 +1,33 @@
 (ns app.core
   (:require
+   [app.examples :as examples]
    [datascript.core :as ds]
    [reagent.core :as r]
    [reagent.dom.client :as rdom]
-   [sci.core :as sci]))
+   [sci.core :as sci]
+   [zprint.core :as zp]))
 
 ;; -- Database --
 
-(def schema
-  {:person/friend
-   {:db/cardinality :db.cardinality/many
-    :db/valueType :db.type/ref}})
+(defonce conn (r/atom (ds/create-conn)))
 
-(defonce conn (ds/create-conn schema))
+(defonce db-state (r/atom (ds/db @conn)))
 
-(defonce _seed
-  (ds/transact! conn
-    [{:db/id -1
-      :person/name "Alice"
-      :person/age 30}
-     {:db/id -2
-      :person/name "Bob"
-      :person/age 25}
-     {:db/id -3
-      :person/name "Charlie"
-      :person/age 35}
-     {:db/id -1
-      :person/friend -2}
-     {:db/id -1
-      :person/friend -3}]))
+(defn- wire-listener! [ds-conn]
+  (ds/listen! ds-conn ::watcher
+    (fn [{:keys [db-after]}]
+      (reset! db-state db-after))))
 
-(defonce db-state (r/atom @conn))
+(wire-listener! @conn)
 
-(ds/listen! conn ::watcher
-  (fn [{:keys [db-after]}]
-    (reset! db-state db-after)))
+(add-watch conn ::conn-swap
+  (fn [_ _ old-ds-conn new-ds-conn]
+    (ds/unlisten! old-ds-conn ::watcher)
+    (wire-listener! new-ds-conn)
+    (reset! db-state (ds/db new-ds-conn))))
 
 ;; -- SCI context --
-;; Pre-requires datascript.core as d, binds conn directly.
+;; Pre-requires datascript.core as d, binds conn atom directly.
 
 (defonce sci-ctx
   (let [ctx (sci/init
@@ -64,25 +54,10 @@
 
 (defonce repl-state
   (r/atom
-    {:code "(d/q '[:find ?e ?name ?age\n       :where\n       [?e :person/name ?name]\n       [?e :person/age ?age]]\n     @conn)"
+    {:code ""
      :result nil
      :error nil}))
 
-(def examples
-  [{:label "Names & ages"
-    :code "(d/q '[:find ?e ?name ?age\n       :where\n       [?e :person/name ?name]\n       [?e :person/age ?age]]\n     @conn)"}
-   {:label "Pull *"
-    :code "(d/pull @conn '[*] 1)"}
-   {:label "All datoms"
-    :code "(seq (d/datoms @conn :eavt))"}
-   {:label "Entity lookup"
-    :code "(d/entity @conn 1)"}
-   {:label "Friends of Alice"
-    :code "(d/q '[:find ?name\n       :where\n       [1 :person/friend ?f]\n       [?f :person/name ?name]]\n     @conn)"}
-   {:label "Add person"
-    :code "(d/transact! conn\n  [{:person/name \"Dave\"\n    :person/age 28}])"}
-   {:label "Retract attr"
-    :code "(d/transact! conn\n  [[:db/retract 2 :person/age 25]])"}])
 
 (defn format-result [result]
   (cond
@@ -115,11 +90,80 @@
                :result nil
                :error (.-message e))))))
 
+(defn format-code! []
+  (let [code (:code @repl-state)]
+    (when (seq code)
+      (try
+        (swap! repl-state assoc :code (zp/zprint-str code {:parse-string? true}))
+        (catch :default _)))))
+
 ;; -- Styles --
 
 (def mono "ui-monospace, 'Cascadia Code', 'Fira Code', monospace")
 
 ;; -- Components --
+
+(defn schema-panel []
+  (let [schema (ds/schema @db-state)
+        attrs (sort (keys schema))]
+    [:div
+     {:style
+      {:background "white"
+       :border-radius "8px"
+       :border "1px solid #e5e7eb"
+       :padding "16px"}}
+     [:h2
+      {:style
+       {:font-size "11px"
+        :font-weight "600"
+        :color "#9ca3af"
+        :letter-spacing "0.08em"
+        :text-transform "uppercase"
+        :margin-bottom "12px"}}
+      "Schema"]
+     (if (empty? schema)
+       [:p
+        {:style
+         {:font-size "12px"
+          :color "#9ca3af"
+          :font-family mono}}
+        "No schema defined"]
+       [:table
+        {:style
+         {:width "100%"
+          :border-collapse "collapse"}}
+        [:thead
+         [:tr
+          (for [label ["Attribute" "Properties"]]
+            [:th
+             {:key label
+              :style
+              {:text-align "left"
+               :padding "4px 8px"
+               :color "#9ca3af"
+               :font-size "11px"
+               :font-family mono
+               :font-weight "500"
+               :border-bottom "2px solid #f3f4f6"}}
+             label])]]
+        [:tbody
+         (for [attr attrs]
+           [:tr
+            {:key (str attr)}
+            [:td
+             {:style
+              {:padding "3px 8px"
+               :color "#2563eb"
+               :font-family mono
+               :font-size "12px"}}
+             (str attr)]
+            [:td
+             {:style
+              {:padding "3px 8px"
+               :font-family mono
+               :font-size "12px"
+               :color "#374151"}}
+             (zp/zprint-str (get schema attr))]])]])]))
 
 (defn datoms-panel []
   (let [db @db-state
@@ -270,68 +314,96 @@
      [:div
       {:style
        {:display "flex"
-        :flex-wrap "wrap"
-        :gap "6px"}}
-      (for [{:keys [label code]} examples]
-        [:button
-         {:key label
-          :on-click (fn [_] (swap! repl-state assoc :code code :result nil :error nil))
-          :style
-          {:background "#f9fafb"
-           :border "1px solid #e5e7eb"
-           :border-radius "4px"
-           :padding "3px 10px"
-           :font-size "12px"
-           :cursor "pointer"
-           :color "#374151"}}
-         label])]
-     [:textarea
-      {:value code
-       :on-change (fn [e]
-                    (swap! repl-state assoc :code (.. e -target -value)))
-       :on-key-down (fn [e]
-                      (when (and (.-metaKey e) (= (.-key e) "Enter"))
-                        (.preventDefault e)
-                        (eval-code!)))
-       :spell-check false
-       :style
-       {:width "100%"
-        :height "180px"
-        :font-family mono
-        :font-size "13px"
-        :padding "10px"
-        :border "1px solid #d1d5db"
-        :border-radius "6px"
-        :resize "vertical"
-        :outline "none"
-        :line-height "1.6"
-        :color "#1f2937"
-        :transition "border-color 0.15s, box-shadow 0.15s"}}]
-     [:div
-      {:style
-       {:display "flex"
-        :justify-content "space-between"
-        :align-items "center"}}
-      [:span
+        :gap "12px"
+        :align-items "start"}}
+      [:div
        {:style
-        {:font-size "12px"
-         :color "#9ca3af"
-         :font-family mono}}
-       "⌘+Enter to evaluate"]
-      [:button
-       {:on-click (fn [_] (eval-code!))
-        :style
-        {:background "#4f46e5"
-         :color "white"
-         :border "none"
-         :border-radius "6px"
-         :padding "7px 20px"
-         :font-size "13px"
-         :font-weight "500"
-         :cursor "pointer"
-         :transition "opacity 0.15s"}}
-       "Evaluate"]]
-     [result-view {:result result :error error}]]))
+        {:display "flex"
+         :flex-direction "column"
+         :gap "6px"
+         :min-width "130px"}}
+       (for [{:keys [label code]} (:examples (first examples/sets))]
+         [:button
+          {:key label
+           :on-click (fn [_]
+                      (swap! repl-state assoc :code code :result nil :error nil)
+                      (format-code!))
+           :style
+           {:background "#f9fafb"
+            :border "1px solid #e5e7eb"
+            :border-radius "4px"
+            :padding "5px 10px"
+            :font-size "12px"
+            :cursor "pointer"
+            :color "#374151"
+            :text-align "left"}}
+          label])]
+      [:div
+       {:style
+        {:flex "1"
+         :display "flex"
+         :flex-direction "column"
+         :gap "12px"}}
+       [:textarea
+        {:value code
+         :on-change (fn [e]
+                      (swap! repl-state assoc :code (.. e -target -value)))
+         :on-key-down (fn [e]
+                        (when (and (.-metaKey e) (= (.-key e) "Enter"))
+                          (.preventDefault e)
+                          (eval-code!)))
+         :spell-check false
+         :style
+         {:width "100%"
+          :height "180px"
+          :font-family mono
+          :font-size "13px"
+          :padding "10px"
+          :border "1px solid #d1d5db"
+          :border-radius "6px"
+          :resize "vertical"
+          :outline "none"
+          :line-height "1.6"
+          :color "#1f2937"
+          :transition "border-color 0.15s, box-shadow 0.15s"}}]
+       [:div
+        {:style
+         {:display "flex"
+          :justify-content "space-between"
+          :align-items "center"}}
+        [:span
+         {:style
+          {:font-size "12px"
+           :color "#9ca3af"
+           :font-family mono}}
+         "⌘+Enter to evaluate"]
+        [:div
+         {:style {:display "flex" :gap "8px"}}
+         [:button
+          {:on-click (fn [_] (format-code!))
+           :style
+           {:background "white"
+            :color "#374151"
+            :border "1px solid #d1d5db"
+            :border-radius "6px"
+            :padding "7px 14px"
+            :font-size "13px"
+            :cursor "pointer"}}
+          "Format"]
+         [:button
+          {:on-click (fn [_] (eval-code!))
+           :style
+           {:background "#4f46e5"
+            :color "white"
+            :border "none"
+            :border-radius "6px"
+            :padding "7px 20px"
+            :font-size "13px"
+            :font-weight "500"
+            :cursor "pointer"
+            :transition "opacity 0.15s"}}
+          "Evaluate"]]]
+       [result-view {:result result :error error}]]]]))
 
 (defn code-badge [s]
   [:code
@@ -386,7 +458,13 @@
        :grid-template-columns "1fr 1fr"
        :gap "20px"
        :align-items "start"}}
-     [datoms-panel]
+     [:div
+      {:style
+       {:display "flex"
+        :flex-direction "column"
+        :gap "20px"}}
+      [schema-panel]
+      [datoms-panel]]
      [repl-panel]]]])
 
 (defonce root (atom nil))

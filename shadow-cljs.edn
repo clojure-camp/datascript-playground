@@ -1,7 +1,8 @@
 {:source-paths ["src"]
  :dependencies [[reagent "2.0.1"]
                 [datascript "1.7.8"]
-                [org.babashka/sci "0.12.51"]]
+                [org.babashka/sci "0.12.51"]
+                [zprint "1.2.9"]]
  :dev-http {8080 "public"}
  :builds
  {:app
