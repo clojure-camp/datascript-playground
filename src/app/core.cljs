@@ -50,14 +50,20 @@
     (sci/eval-string* ctx "(require '[datascript.core :as d])")
     ctx))
 
-;; -- REPL state --
+;; -- Cell state --
+
+(defonce next-id (atom 0))
+
+(defn- new-id! [] (swap! next-id inc))
+
+(defn- new-cell
+  ([] (new-cell ""))
+  ([code] {:id (new-id!) :code code :result nil :error nil}))
 
 (defonce repl-state
-  (r/atom
-    {:code ""
-     :result nil
-     :error nil}))
+  (r/atom {:cells [(new-cell)]}))
 
+;; -- Cell operations --
 
 (defn format-result [result]
   (cond
@@ -78,24 +84,48 @@
         (str (subs s 0 4000) "\n;; … (truncated)")
         s))))
 
-(defn eval-code! []
-  (let [code (:code @repl-state)]
+(defn- update-cell [cells id f]
+  (mapv (fn [c] (if (= (:id c) id) (f c) c)) cells))
+
+(defn eval-cell! [id]
+  (let [cell (->> (:cells @repl-state)
+                  (filter (fn [c] (= (:id c) id)))
+                  first)
+        code (:code cell)]
     (try
       (let [result (sci/eval-string* sci-ctx code)]
-        (swap! repl-state assoc
-               :result (format-result result)
-               :error nil))
+        (swap! repl-state update :cells update-cell id
+               #(assoc % :result (format-result result) :error nil)))
       (catch :default e
-        (swap! repl-state assoc
-               :result nil
-               :error (.-message e))))))
+        (swap! repl-state update :cells update-cell id
+               #(assoc % :result nil :error (.-message e)))))))
 
-(defn format-code! []
-  (let [code (:code @repl-state)]
+(defn format-cell! [id]
+  (let [cell (->> (:cells @repl-state)
+                  (filter (fn [c] (= (:id c) id)))
+                  first)
+        code (:code cell)]
     (when (seq code)
       (try
-        (swap! repl-state assoc :code (zp/zprint-str code {:parse-string? true}))
+        (let [formatted (zp/zprint-str code {:parse-string? true})]
+          (swap! repl-state update :cells update-cell id #(assoc % :code formatted)))
         (catch :default _)))))
+
+(defn run-all! []
+  (doseq [{:keys [id]} (:cells @repl-state)]
+    (eval-cell! id)))
+
+(defn add-cell! []
+  (swap! repl-state update :cells conj (new-cell)))
+
+(defn load-example-set! [set-id]
+  (if (nil? set-id)
+    (swap! repl-state assoc :cells [(new-cell)])
+    (let [example-set (->> examples/sets
+                           (filter (fn [s] (= (:id s) set-id)))
+                           first)
+          cells (mapv (fn [{:keys [code]}] (new-cell code)) (:examples example-set))]
+      (swap! repl-state assoc :cells cells))))
 
 ;; -- Styles --
 
@@ -242,168 +272,216 @@
          datoms)]]]))
 
 (defn result-view [{:keys [result error]}]
+  (cond
+    error
+    [:pre
+     {:style
+      {:background "#fef2f2"
+       :border "1px solid #fecaca"
+       :border-radius "6px"
+       :padding "10px"
+       :font-size "12px"
+       :font-family mono
+       :color "#dc2626"
+       :overflow "auto"
+       :white-space "pre-wrap"
+       :margin 0}}
+     error]
+
+    result
+    [:pre
+     {:style
+      {:background "#f8fafc"
+       :border "1px solid #e2e8f0"
+       :border-radius "6px"
+       :padding "10px"
+       :font-size "12px"
+       :font-family mono
+       :color "#1f2937"
+       :overflow "auto"
+       :white-space "pre-wrap"
+       :margin 0}}
+     result]
+
+    :else nil))
+
+(defn cell-view [{:keys [id code result error]}]
   [:div
+   {:style
+    {:display "grid"
+     :grid-template-columns "1fr 1fr"
+     :gap "16px"
+     :padding "12px 0"
+     :border-bottom "1px solid #f3f4f6"}}
    [:div
     {:style
-     {:font-size "11px"
-      :font-weight "600"
-      :color "#9ca3af"
-      :letter-spacing "0.08em"
-      :text-transform "uppercase"
-      :margin-bottom "6px"}}
-    "Result"]
-   (cond
-     error
-     [:pre
-      {:style
-       {:background "#fef2f2"
-        :border "1px solid #fecaca"
-        :border-radius "6px"
-        :padding "10px"
-        :font-size "12px"
+     {:display "flex"
+      :flex-direction "column"
+      :gap "6px"}}
+    [:div
+     {:style
+      {:display "flex"
+       :gap "6px"
+       :align-items "flex-start"}}
+     [:button
+      {:on-click (fn [_] (eval-cell! id))
+       :title "Run (⌘+Enter)"
+       :style
+       {:background "#4f46e5"
+        :color "white"
+        :border "none"
+        :border-radius "4px"
+        :padding "5px 9px"
+        :cursor "pointer"
+        :font-size "13px"
+        :line-height "1"
+        :flex-shrink 0}}
+      "▶"]
+     [:textarea
+      {:value code
+       :on-change (fn [e]
+                    (swap! repl-state update :cells update-cell id
+                           #(assoc % :code (.. e -target -value))))
+       :on-key-down (fn [e]
+                      (when (and (.-metaKey e) (= (.-key e) "Enter"))
+                        (.preventDefault e)
+                        (eval-cell! id)))
+       :spell-check false
+       :style
+       {:width "100%"
+        :height "120px"
         :font-family mono
-        :color "#dc2626"
-        :overflow "auto"
-        :white-space "pre-wrap"
-        :margin 0}}
-      error]
-
-     result
-     [:pre
-      {:style
-       {:background "#f8fafc"
-        :border "1px solid #e2e8f0"
+        :font-size "13px"
+        :padding "8px"
+        :border "1px solid #d1d5db"
         :border-radius "6px"
-        :padding "10px"
-        :font-size "12px"
-        :font-family mono
+        :resize "vertical"
+        :outline "none"
+        :line-height "1.6"
         :color "#1f2937"
-        :overflow "auto"
-        :white-space "pre-wrap"
-        :margin 0}}
-      result]
+        :box-sizing "border-box"}}]]
+    [:div
+     {:style {:display "flex" :justify-content "flex-end"}}
+     [:button
+      {:on-click (fn [_] (format-cell! id))
+       :style
+       {:background "white"
+        :color "#6b7280"
+        :border "1px solid #e5e7eb"
+        :border-radius "4px"
+        :padding "3px 8px"
+        :font-size "11px"
+        :cursor "pointer"}}
+      "Format"]]]
+   [:div
+    [result-view {:result result :error error}]]])
 
-     :else
-     [:div
-      {:style
-       {:font-size "13px"
-        :color "#9ca3af"
-        :font-style "italic"
-        :padding "8px 0"}}
-      "Hit Evaluate to see results"])])
+(defn example-selector []
+  [:select
+   {:on-change (fn [e]
+                 (let [v (.. e -target -value)]
+                   (load-example-set! (when (seq v) (keyword v)))))
+    :style
+    {:font-size "13px"
+     :border "1px solid #d1d5db"
+     :border-radius "6px"
+     :padding "5px 10px"
+     :background "white"
+     :color "#374151"
+     :cursor "pointer"}}
+   [:option {:value ""} "Blank"]
+   (for [{:keys [id label]} examples/sets]
+     [:option {:key (str id) :value (name id)} label])])
 
-(defn repl-panel []
-  (let [{:keys [code result error]} @repl-state]
+(defn notebook-panel []
+  (let [{:keys [cells]} @repl-state]
     [:div
      {:style
       {:background "white"
        :border-radius "8px"
        :border "1px solid #e5e7eb"
-       :padding "16px"
-       :display "flex"
-       :flex-direction "column"
-       :gap "12px"}}
-     [:h2
-      {:style
-       {:font-size "11px"
-        :font-weight "600"
-        :color "#9ca3af"
-        :letter-spacing "0.08em"
-        :text-transform "uppercase"}}
-      "REPL"]
+       :padding "16px"}}
      [:div
       {:style
        {:display "flex"
-        :gap "12px"
-        :align-items "start"}}
+        :justify-content "space-between"
+        :align-items "center"
+        :margin-bottom "8px"}}
       [:div
-       {:style
-        {:display "flex"
-         :flex-direction "column"
-         :gap "6px"
-         :min-width "130px"}}
-       (for [{:keys [label code]} (:examples (first examples/sets))]
-         [:button
-          {:key label
-           :on-click (fn [_]
-                      (swap! repl-state assoc :code code :result nil :error nil)
-                      (format-code!))
-           :style
-           {:background "#f9fafb"
-            :border "1px solid #e5e7eb"
-            :border-radius "4px"
-            :padding "5px 10px"
-            :font-size "12px"
-            :cursor "pointer"
-            :color "#374151"
-            :text-align "left"}}
-          label])]
+       {:style {:display "flex" :align-items "center" :gap "12px"}}
+       [:h2
+        {:style
+         {:font-size "11px"
+          :font-weight "600"
+          :color "#9ca3af"
+          :letter-spacing "0.08em"
+          :text-transform "uppercase"}}
+        "Notebook"]
+       [:p
+        {:style
+         {:font-size "12px"
+          :color "#9ca3af"
+          :display "flex"
+          :align-items "center"
+          :gap "4px"
+          :flex-wrap "wrap"
+          :margin 0}}
+        "Bindings: "
+        [code-badge "conn"] " · "
+        [code-badge "d/q"] " · "
+        [code-badge "d/transact!"] " · "
+        [code-badge "d/pull"] " · "
+        [code-badge "d/datoms"] " · "
+        [code-badge "d/entity"] " · "
+        [code-badge "d/touch"]]]
       [:div
-       {:style
-        {:flex "1"
-         :display "flex"
-         :flex-direction "column"
-         :gap "12px"}}
-       [:textarea
-        {:value code
-         :on-change (fn [e]
-                      (swap! repl-state assoc :code (.. e -target -value)))
-         :on-key-down (fn [e]
-                        (when (and (.-metaKey e) (= (.-key e) "Enter"))
-                          (.preventDefault e)
-                          (eval-code!)))
-         :spell-check false
+       {:style {:display "flex" :gap "8px"}}
+       [:button
+        {:on-click (fn [_] (run-all!))
          :style
-         {:width "100%"
-          :height "180px"
-          :font-family mono
-          :font-size "13px"
-          :padding "10px"
+         {:background "#4f46e5"
+          :color "white"
+          :border "none"
+          :border-radius "6px"
+          :padding "5px 14px"
+          :font-size "12px"
+          :font-weight "500"
+          :cursor "pointer"}}
+        "Run All"]
+       [:button
+        {:on-click (fn [_] (add-cell!))
+         :style
+         {:background "white"
+          :color "#374151"
           :border "1px solid #d1d5db"
           :border-radius "6px"
-          :resize "vertical"
-          :outline "none"
-          :line-height "1.6"
-          :color "#1f2937"
-          :transition "border-color 0.15s, box-shadow 0.15s"}}]
-       [:div
-        {:style
-         {:display "flex"
-          :justify-content "space-between"
-          :align-items "center"}}
-        [:span
-         {:style
-          {:font-size "12px"
-           :color "#9ca3af"
-           :font-family mono}}
-         "⌘+Enter to evaluate"]
-        [:div
-         {:style {:display "flex" :gap "8px"}}
-         [:button
-          {:on-click (fn [_] (format-code!))
-           :style
-           {:background "white"
-            :color "#374151"
-            :border "1px solid #d1d5db"
-            :border-radius "6px"
-            :padding "7px 14px"
-            :font-size "13px"
-            :cursor "pointer"}}
-          "Format"]
-         [:button
-          {:on-click (fn [_] (eval-code!))
-           :style
-           {:background "#4f46e5"
-            :color "white"
-            :border "none"
-            :border-radius "6px"
-            :padding "7px 20px"
-            :font-size "13px"
-            :font-weight "500"
-            :cursor "pointer"
-            :transition "opacity 0.15s"}}
-          "Evaluate"]]]
-       [result-view {:result result :error error}]]]]))
+          :padding "5px 12px"
+          :font-size "12px"
+          :cursor "pointer"}}
+        "+ Cell"]]]
+     [:div
+      {:style
+       {:display "grid"
+        :grid-template-columns "1fr 1fr"
+        :gap "16px"
+        :padding-bottom "6px"
+        :border-bottom "2px solid #f3f4f6"}}
+      [:span
+       {:style
+        {:font-size "11px"
+         :font-weight "500"
+         :color "#9ca3af"
+         :font-family mono}}
+       "Code"]
+      [:span
+       {:style
+        {:font-size "11px"
+         :font-weight "500"
+         :color "#9ca3af"
+         :font-family mono}}
+       "Result"]]
+     (for [{:keys [id] :as cell} cells]
+       ^{:key id} [cell-view cell])]))
 
 (defn code-badge [s]
   [:code
@@ -428,34 +506,29 @@
       :margin "0 auto"}}
     [:div
      {:style
-      {:margin-bottom "20px"}}
+      {:display "flex"
+       :justify-content "space-between"
+       :align-items "flex-start"
+       :margin-bottom "20px"}}
      [:h1
       {:style
        {:font-size "20px"
         :font-weight "700"
-        :color "#111827"
-        :margin-bottom "6px"}}
+        :color "#111827"}}
       "DataScript Playground"]
-     [:p
+     [:div
       {:style
-       {:font-size "13px"
-        :color "#6b7280"
-        :display "flex"
+       {:display "flex"
         :align-items "center"
-        :gap "4px"
-        :flex-wrap "wrap"}}
-      "Bindings: "
-      [code-badge "conn"] " · "
-      [code-badge "d/q"] " · "
-      [code-badge "d/transact!"] " · "
-      [code-badge "d/pull"] " · "
-      [code-badge "d/datoms"] " · "
-      [code-badge "d/entity"] " · "
-      [code-badge "d/touch"]]]
+        :gap "8px"}}
+      [:span
+       {:style {:font-size "13px" :color "#6b7280"}}
+       "Load example:"]
+      [example-selector]]]
     [:div
      {:style
       {:display "grid"
-       :grid-template-columns "1fr 1fr"
+       :grid-template-columns "25em 1fr"
        :gap "20px"
        :align-items "start"}}
      [:div
@@ -465,7 +538,7 @@
         :gap "20px"}}
       [schema-panel]
       [datoms-panel]]
-     [repl-panel]]]])
+     [notebook-panel]]]])
 
 (defonce root (atom nil))
 
