@@ -124,7 +124,7 @@
     (let [example-set (->> examples/sets
                            (filter (fn [s] (= (:id s) set-id)))
                            first)
-          cells (mapv (fn [{:keys [code]}] (new-cell code)) (:examples example-set))]
+          cells (mapv (fn [{:keys [label code]}] (new-cell (str ";; " label "\n" code))) (:examples example-set))]
       (swap! repl-state assoc :cells cells))))
 
 ;; -- Styles --
