@@ -10,7 +10,8 @@
    ["@codemirror/language" :refer [StreamLanguage defaultHighlightStyle syntaxHighlighting]]
    ["@codemirror/legacy-modes/mode/clojure" :as cm-clojure]
    ["@codemirror/state" :refer [EditorState]]
-   ["@codemirror/view" :refer [EditorView keymap]]))
+   ["@codemirror/view" :refer [EditorView keymap]]
+   ["@jurjanpaul/codemirror6-parinfer" :refer [parinferExtension]]))
 
 ;; -- Database --
 
@@ -340,6 +341,7 @@
                     #js {:doc value
                          :extensions
                          #js [(history)
+                              (parinferExtension)
                               (syntaxHighlighting defaultHighlightStyle)
                               (StreamLanguage.define (.-clojure cm-clojure))
                               (.of keymap (.concat defaultKeymap historyKeymap))
