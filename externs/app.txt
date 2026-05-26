@@ -1,0 +1,16 @@
+# CodeMirror 6 static methods called via (ClassName.method ...) dotted syntax
+# These are not caught by shadow-cljs :refer externs inference
+theme
+create
+define
+
+# CodeMirror 6 static properties on EditorView
+lineWrapping
+updateListener
+
+# CodeMirror 6 instance methods/properties accessed on ^js-hinted vars
+dispatch
+destroy
+state
+doc
+docChanged

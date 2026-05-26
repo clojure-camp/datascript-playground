@@ -299,7 +299,7 @@
        :component-did-update
        (fn [this _]
          (let [new-val (:value (r/props this))
-               view @!view
+               ^js view @!view
                cur-val (.toString (.. view -state -doc))]
            (when (not= new-val cur-val)
              (.dispatch view
@@ -309,7 +309,7 @@
 
        :component-will-unmount
        (fn [_]
-         (some-> @!view .destroy))
+         (some-> ^js @!view .destroy))
 
        :reagent-render
        (fn [_]
