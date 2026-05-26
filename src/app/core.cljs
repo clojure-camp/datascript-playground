@@ -9,7 +9,7 @@
    ["@codemirror/commands" :refer [defaultKeymap history historyKeymap]]
    ["@codemirror/language" :refer [StreamLanguage defaultHighlightStyle syntaxHighlighting]]
    ["@codemirror/legacy-modes/mode/clojure" :as cm-clojure]
-   ["@codemirror/state" :refer [EditorState]]
+   ["@codemirror/state" :refer [EditorState Prec]]
    ["@codemirror/view" :refer [EditorView keymap]]
    ["@jurjanpaul/codemirror6-parinfer" :refer [parinferExtension]]))
 
@@ -345,8 +345,9 @@
                               (syntaxHighlighting defaultHighlightStyle)
                               (StreamLanguage.define (.-clojure cm-clojure))
                               (.of keymap (.concat defaultKeymap historyKeymap))
-                              (.of keymap #js [#js {:key "Mod-Enter"
-                                                    :run (fn [] (on-run) true)}])
+                              (.highest Prec
+                                (.of keymap #js [#js {:key "Mod-Enter"
+                                                      :run (fn [] (on-run) true)}]))
                               EditorView.lineWrapping
                               (EditorView.theme
                                 #js {"&.cm-focused" #js {"outline" "none"}
@@ -414,7 +415,8 @@
                     (ensure-trailing-blank!))
        :on-run (fn [] (eval-cell! id))}]
      [:button
-      {:on-click (fn [_] (eval-cell! id))
+      {:on-mouse-down (fn [e] (.preventDefault e))
+       :on-click (fn [_] (eval-cell! id))
        :title "Run (⌘+Enter)"
        :style
        {:background "#4f46e5"
