@@ -581,7 +581,10 @@
       {:style
        {:display "flex"
         :flex-direction "column"
-        :gap "20px"}}
+        :gap "20px"
+        :position "sticky"
+        :top "24px"
+        :align-self "start"}}
       [schema-panel]
       [datoms-panel]]
      [notebook-panel]]]])
