@@ -404,6 +404,13 @@
       {:display "flex"
        :gap "6px"
        :align-items "flex-start"}}
+     [code-editor
+      {:value code
+       :on-change (fn [new-code]
+                    (swap! repl-state update :cells update-cell id
+                           #(assoc % :code new-code))
+                    (ensure-trailing-blank!))
+       :on-run (fn [] (eval-cell! id))}]
      [:button
       {:on-click (fn [_] (eval-cell! id))
        :title "Run (⌘+Enter)"
@@ -416,15 +423,9 @@
         :cursor "pointer"
         :font-size "13px"
         :line-height "1"
-        :flex-shrink 0}}
-      "▶"]
-     [code-editor
-      {:value code
-       :on-change (fn [new-code]
-                    (swap! repl-state update :cells update-cell id
-                           #(assoc % :code new-code))
-                    (ensure-trailing-blank!))
-       :on-run (fn [] (eval-cell! id))}]]
+        :flex-shrink 0
+        :align-self "flex-start"}}
+      "▶"]]
     [:div
      {:style {:display "flex" :justify-content "flex-end"}}
      [:button
