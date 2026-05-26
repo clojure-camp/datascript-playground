@@ -40,7 +40,7 @@
         {:style {:width "100%" :border-collapse "collapse"}}
         [:thead
          [:tr
-          (for [label ["Attribute" "Type" "Cardinality"]]
+          (for [label ["Attribute" "Property" "Value"]]
             [:th
              {:key label
               :style
@@ -53,9 +53,10 @@
                :border-bottom "2px solid #f3f4f6"}}
              label])]]
         [:tbody
-         (for [attr attrs]
+         (for [attr attrs
+               [k v] (sort (get schema attr))]
            [:tr
-            {:key (str attr)}
+            {:key (str attr k)}
             [:td
              {:style
               {:padding "4px 8px"
@@ -68,15 +69,16 @@
               {:padding "4px 8px"
                :font-family mono
                :font-size "12px"
-               :color "#374151"}}
-             (-> schema (get attr) :db/valueType str (str/replace #"^:db.type/" ""))]
+               :color "#9ca3af"}}
+             (str k)]
             [:td
              {:style
               {:padding "4px 8px"
                :font-family mono
                :font-size "12px"
                :color "#374151"}}
-             (-> schema (get attr) :db/cardinality str (str/replace #"^:db.cardinality/" ""))]])]])]))
+             (str v)]])]])]))
+
 
 (defn datoms-panel []
   (let [db @s/db-state
@@ -518,7 +520,7 @@
     [:div
      {:style
       {:display "grid"
-       :grid-template-columns "25em 1fr"
+       :grid-template-columns "28em 1fr"
        :gap "20px"
        :align-items "start"}}
      [:div
