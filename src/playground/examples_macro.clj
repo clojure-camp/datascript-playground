@@ -23,12 +23,14 @@
         examples)
 
       (comment-label line)
-      (let [new-label (comment-label line)
-            done (if current-label
-                   (conj examples {:label current-label
-                                   :code (str/trim (str/join "\n" current-code))})
-                   examples)]
-        (recur rest-lines new-label [] done))
+      (let [new-label-line (comment-label line)]
+        (if (and current-label (empty? current-code))
+          (recur rest-lines (str current-label "\n" new-label-line) current-code examples)
+          (let [done (if current-label
+                       (conj examples {:label current-label
+                                       :code (str/trim (str/join "\n" current-code))})
+                       examples)]
+            (recur rest-lines new-label-line [] done))))
 
       :else
       (recur rest-lines current-label (conj current-code line) examples))))
