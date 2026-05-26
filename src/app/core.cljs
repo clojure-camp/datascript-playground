@@ -1,5 +1,6 @@
 (ns app.core
   (:require
+   [clojure.string :as str]
    [app.examples :as examples]
    [datascript.core :as ds]
    [reagent.core :as r]
@@ -130,6 +131,29 @@
 (defn run-all! []
   (doseq [{:keys [id]} (:cells @repl-state)]
     (eval-cell! id)))
+
+(defn download-cells! []
+  (let [codes (->> (:cells @repl-state)
+                   (map :code)
+                   (filter seq))
+        content (str "(require '[datascript.core :as d])\n\n"
+                     "(def conn (atom (d/create-conn)))\n\n"
+                     "(defn update-schema! [conn schema-updates]\n"
+                     "  (let [current-db (d/db @conn)\n"
+                     "        new-schema (merge (d/schema current-db) schema-updates)]\n"
+                     "    (reset! conn\n"
+                     "            (d/conn-from-db\n"
+                     "             (d/init-db (d/datoms current-db :eavt) new-schema)))))\n\n"
+                     (str/join "\n\n" codes))
+        blob (js/Blob. #js [content] #js {:type "text/plain"})
+        url (.createObjectURL js/URL blob)
+        a (.createElement js/document "a")]
+    (set! (.-href a) url)
+    (set! (.-download a) "notebook.clj")
+    (.appendChild (.-body js/document) a)
+    (.click a)
+    (.removeChild (.-body js/document) a)
+    (.revokeObjectURL js/URL url)))
 
 (defn- ensure-trailing-blank! []
   (swap! repl-state update :cells
@@ -519,6 +543,18 @@
         [code-badge "update-schema!"]]]
       [:div
        {:style {:display "flex" :gap "8px"}}
+       [:button
+        {:on-click (fn [_] (download-cells!))
+         :style
+         {:background "white"
+          :color "#374151"
+          :border "1px solid #d1d5db"
+          :border-radius "6px"
+          :padding "5px 14px"
+          :font-size "12px"
+          :font-weight "500"
+          :cursor "pointer"}}
+        "Download"]
        [:button
         {:on-click (fn [_] (run-all!))
          :style
