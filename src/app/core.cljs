@@ -117,19 +117,21 @@
         (swap! repl-state update :cells update-cell id
                #(assoc % :result nil :error (.-message e)))))))
 
+(defn- format-code [code]
+  (try
+    (zp/zprint-str code {:parse-string-all? true
+                         :width 60
+                         :map {:comma? false}
+                         :style :respect-nl})
+    (catch :default _ code)))
+
 (defn format-cell! [id]
   (let [cell (->> (:cells @repl-state)
                   (filter (fn [c] (= (:id c) id)))
                   first)
         code (:code cell)]
     (when (seq code)
-      (try
-        (let [formatted (zp/zprint-str code {:parse-string-all? true
-                                             :width 60
-                                             :map {:comma? false}
-                                             :style :respect-nl})]
-          (swap! repl-state update :cells update-cell id #(assoc % :code formatted)))
-        (catch :default _)))))
+      (swap! repl-state update :cells update-cell id #(assoc % :code (format-code code))))))
 
 (defn run-all! []
   (doseq [{:keys [id]} (:cells @repl-state)]
@@ -171,7 +173,9 @@
     (let [example-set (->> examples/sets
                            (filter (fn [s] (= (:id s) set-id)))
                            first)
-          cells (mapv (fn [{:keys [label code]}] (new-cell (str ";; " label "\n" code))) (:examples example-set))]
+          cells (mapv (fn [{:keys [label code]}]
+                        (new-cell (format-code (str ";; " label "\n" code))))
+                      (:examples example-set))]
       (swap! repl-state assoc :cells cells)))
   (ensure-trailing-blank!))
 
