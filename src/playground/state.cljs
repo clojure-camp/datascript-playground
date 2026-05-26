@@ -341,30 +341,33 @@
 (add-watch db-state ::storage (fn [_ _ _ _] (save-to-storage!)))
 
 (defn load-saved-state! []
-  (when-let [saved (load-from-storage)]
-    (let [all-cell-ids (->> (:tabs saved) (mapcat :cells) (map :id) (filter int?))]
-      (when (seq all-cell-ids)
-        (reset! next-id (apply max all-cell-ids))))
-    (let [all-tab-ids (->> (:tabs saved) (map :id) (filter int?))]
-      (when (seq all-tab-ids)
-        (reset! next-tab-id (apply max all-tab-ids))))
-    (let [active-id (:active-tab-id saved)
-          active (first (filter (fn [t] (= (:id t) active-id)) (:tabs saved)))
-          snaps (or (:db-history-snapshots active)
-                    (when-let [s (:db-snapshot active)] [s])
-                    [])
-          idx (or (:db-history-idx active) (max 0 (dec (count snaps))))]
-      (when (seq snaps)
-        (reset! db-history (mapv snapshot->db snaps))
-        (reset! db-history-idx idx)
-        (reset! conn (snapshot->conn (last snaps)))))
-    (reset! tabs-state
-            (update saved :tabs
-                    (fn [tabs]
-                      (mapv (fn [tab]
-                              (update tab :cells
-                                      (fn [cells]
-                                        (mapv (fn [{:keys [id code]}]
-                                                {:id id :code code :result nil :error nil})
-                                              cells))))
-                            tabs))))))
+  (if-let [saved (load-from-storage)]
+    (do
+      (let [all-cell-ids (->> (:tabs saved) (mapcat :cells) (map :id) (filter int?))]
+        (when (seq all-cell-ids)
+          (reset! next-id (apply max all-cell-ids))))
+      (let [all-tab-ids (->> (:tabs saved) (map :id) (filter int?))]
+        (when (seq all-tab-ids)
+          (reset! next-tab-id (apply max all-tab-ids))))
+      (let [active-id (:active-tab-id saved)
+            active (first (filter (fn [t] (= (:id t) active-id)) (:tabs saved)))
+            snaps (or (:db-history-snapshots active)
+                      (when-let [s (:db-snapshot active)] [s])
+                      [])
+            idx (or (:db-history-idx active) (max 0 (dec (count snaps))))]
+        (when (seq snaps)
+          (reset! db-history (mapv snapshot->db snaps))
+          (reset! db-history-idx idx)
+          (reset! conn (snapshot->conn (last snaps)))))
+      (reset! tabs-state
+              (update saved :tabs
+                      (fn [tabs]
+                        (mapv (fn [tab]
+                                (update tab :cells
+                                        (fn [cells]
+                                          (mapv (fn [{:keys [id code]}]
+                                                  {:id id :code code :result nil :error nil})
+                                                cells))))
+                              tabs)))))
+    (let [friends (->> examples/sets (filter (fn [s] (= (:id s) :friends))) first)]
+      (swap! tabs-state assoc :tabs [{:id 1 :label (:label friends) :cells (cells-for-set :friends)}]))))
