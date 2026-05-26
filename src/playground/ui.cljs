@@ -36,49 +36,54 @@
        [:p
         {:style {:font-size "12px" :color "#9ca3af" :font-style "italic"}}
         "No schema defined yet"]
-       [:table
-        {:style {:width "100%" :border-collapse "collapse"}}
-        [:thead
-         [:tr
-          (for [label ["Attribute" "Property" "Value"]]
-            [:th
-             {:key label
-              :style
-              {:text-align "left"
-               :padding "4px 8px"
-               :color "#9ca3af"
-               :font-size "11px"
-               :font-family mono
-               :font-weight "500"
-               :border-bottom "2px solid #f3f4f6"}}
-             label])]]
-        [:tbody
-         (for [attr attrs
-               [k v] (sort (get schema attr))]
-           [:tr
-            {:key (str attr k)}
-            [:td
-             {:style
-              {:padding "4px 8px"
-               :color "#2563eb"
-               :font-family mono
-               :font-size "12px"}}
-             (str attr)]
-            [:td
-             {:style
-              {:padding "4px 8px"
-               :font-family mono
-               :font-size "12px"
-               :color "#9ca3af"}}
-             (str k)]
-            [:td
-             {:style
-              {:padding "4px 8px"
-               :font-family mono
-               :font-size "12px"
-               :color "#374151"}}
-             (str v)]])]])]))
-
+       [:div
+        {:style {:overflow-x "auto"}}
+        [:table
+         {:style {:width "100%" :border-collapse "collapse"}}
+         [:thead
+          [:tr
+           (for [label ["Attribute" "Property" "Value"]]
+             [:th
+              {:key label
+               :style
+               {:text-align "left"
+                :padding "4px 8px"
+                :color "#9ca3af"
+                :font-size "11px"
+                :font-family mono
+                :font-weight "500"
+                :white-space "nowrap"
+                :border-bottom "2px solid #f3f4f6"}}
+              label])]]
+         [:tbody
+          (for [attr attrs
+                [k v] (sort (get schema attr))]
+            [:tr
+             {:key (str attr k)}
+             [:td
+              {:style
+               {:padding "4px 8px"
+                :color "#2563eb"
+                :font-family mono
+                :font-size "12px"
+                :white-space "nowrap"}}
+              (str attr)]
+             [:td
+              {:style
+               {:padding "4px 8px"
+                :font-family mono
+                :font-size "12px"
+                :color "#9ca3af"
+                :white-space "nowrap"}}
+              (str k)]
+             [:td
+              {:style
+               {:padding "4px 8px"
+                :font-family mono
+                :font-size "12px"
+                :color "#374151"
+                :white-space "nowrap"}}
+              (str v)]])]]])]))
 
 (defn datoms-panel []
   (let [history @s/db-history
