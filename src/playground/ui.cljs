@@ -517,7 +517,7 @@
       {:style
        {:font-size "20px"
         :font-weight "700"
-        :color "#111827"
+        :color "#9ca3af"
         :margin 0}}
       "DataScript Playground"]
      [:div {:style {:flex 1}}]
