@@ -1,4 +1,15 @@
 
+(require '[datascript.core :as d])
+
+(def conn (atom (d/create-conn)))
+
+(defn update-schema! [conn schema-updates]
+  (let [current-db (d/db @conn)
+        new-schema (merge (d/schema current-db) schema-updates)]
+    (reset! conn
+            (d/conn-from-db
+             (d/init-db (d/datoms current-db :eavt) new-schema)))))
+
 ;; Initialize schema
 (reset! conn
         (d/create-conn {:person/friend

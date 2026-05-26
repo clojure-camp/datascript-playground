@@ -8,6 +8,8 @@
     (when (str/starts-with? trimmed ";;")
       (str/trim (subs trimmed 2)))))
 
+;; Code before the first ";;" label is intentionally ignored — use it for
+;; setup definitions that should not appear as named examples.
 (defn- parse-examples [content]
   (loop [[line & rest-lines] (str/split-lines content)
          current-label nil
