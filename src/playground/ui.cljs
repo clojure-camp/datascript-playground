@@ -311,7 +311,11 @@
     {:style
      {:padding "12px 0"
       :border-bottom "1px solid #f3f4f6"}}
-    [result-view {:result result :error error}]]])
+    [:div
+     {:style
+      {:max-height "20em"
+       :overflow-y "auto"}}
+     [result-view {:result result :error error}]]]])
 
 (defn tabs-bar []
   (r/with-let
