@@ -5,7 +5,12 @@
    [reagent.core :as r]
    [reagent.dom.client :as rdom]
    [sci.core :as sci]
-   [zprint.core :as zp]))
+   [zprint.core :as zp]
+   ["@codemirror/commands" :refer [defaultKeymap history historyKeymap]]
+   ["@codemirror/language" :refer [StreamLanguage defaultHighlightStyle syntaxHighlighting]]
+   ["@codemirror/legacy-modes/mode/clojure" :as cm-clojure]
+   ["@codemirror/state" :refer [EditorState]]
+   ["@codemirror/view" :refer [EditorView keymap]]))
 
 ;; -- Database --
 
@@ -310,6 +315,67 @@
 
     :else nil))
 
+(defn code-editor [{:keys [value on-change on-run]}]
+  (let [!view (atom nil)
+        !container (atom nil)]
+    (r/create-class
+      {:display-name "code-editor"
+
+       :component-did-mount
+       (fn [_]
+         (reset! !view
+           (EditorView.
+             #js {:state
+                  (EditorState.create
+                    #js {:doc value
+                         :extensions
+                         #js [(history)
+                              (syntaxHighlighting defaultHighlightStyle)
+                              (StreamLanguage.define (.-clojure cm-clojure))
+                              (.of keymap (.concat defaultKeymap historyKeymap))
+                              (.of keymap #js [#js {:key "Mod-Enter"
+                                                    :run (fn [] (on-run) true)}])
+                              EditorView.lineWrapping
+                              (EditorView.theme
+                                #js {"&.cm-focused" #js {"outline" "none"}
+                                     ".cm-content" #js {"padding" "8px"
+                                                        "fontFamily" mono
+                                                        "fontSize" "13px"
+                                                        "lineHeight" "1.6"
+                                                        "color" "#1f2937"
+                                                        "minHeight" "108px"}
+                                     ".cm-line" #js {"padding" "0"}})
+                              (.of EditorView.updateListener
+                                (fn [^js upd]
+                                  (when (.-docChanged upd)
+                                    (on-change (.toString (.. upd -state -doc))))))]})
+                  :parent @!container})))
+
+       :component-did-update
+       (fn [this _]
+         (let [new-val (:value (r/props this))
+               view @!view
+               cur-val (.toString (.. view -state -doc))]
+           (when (not= new-val cur-val)
+             (.dispatch view
+               #js {:changes #js {:from 0
+                                   :to (.. view -state -doc -length)
+                                   :insert new-val}}))))
+
+       :component-will-unmount
+       (fn [_]
+         (some-> @!view .destroy))
+
+       :reagent-render
+       (fn [_]
+         [:div
+          {:ref (fn [el] (reset! !container el))
+           :style
+           {:border "1px solid #d1d5db"
+            :border-radius "6px"
+            :overflow "hidden"
+            :flex 1}}])})))
+
 (defn cell-view [{:keys [id code result error]}]
   [:div
    {:style
@@ -342,30 +408,13 @@
         :line-height "1"
         :flex-shrink 0}}
       "▶"]
-     [:textarea
+     [code-editor
       {:value code
-       :on-change (fn [e]
+       :on-change (fn [new-code]
                     (swap! repl-state update :cells update-cell id
-                           #(assoc % :code (.. e -target -value)))
+                           #(assoc % :code new-code))
                     (ensure-trailing-blank!))
-       :on-key-down (fn [e]
-                      (when (and (.-metaKey e) (= (.-key e) "Enter"))
-                        (.preventDefault e)
-                        (eval-cell! id)))
-       :spell-check false
-       :style
-       {:width "100%"
-        :height "120px"
-        :font-family mono
-        :font-size "13px"
-        :padding "8px"
-        :border "1px solid #d1d5db"
-        :border-radius "6px"
-        :resize "vertical"
-        :outline "none"
-        :line-height "1.6"
-        :color "#1f2937"
-        :box-sizing "border-box"}}]]
+       :on-run (fn [] (eval-cell! id))}]]
     [:div
      {:style {:display "flex" :justify-content "flex-end"}}
      [:button
@@ -398,6 +447,18 @@
    [:option {:value ""} "Blank"]
    (for [{:keys [id label]} examples/sets]
      [:option {:key (str id) :value (name id)} label])])
+
+
+(defn code-badge [s]
+  [:code
+   {:style
+    {:font-family mono
+     :background "#f3f4f6"
+     :padding "1px 5px"
+     :border-radius "3px"
+     :font-size "12px"
+     :color "#374151"}}
+   s])
 
 (defn notebook-panel []
   (let [{:keys [cells]} @repl-state]
@@ -478,16 +539,6 @@
      (for [{:keys [id] :as cell} cells]
        ^{:key id} [cell-view cell])]))
 
-(defn code-badge [s]
-  [:code
-   {:style
-    {:font-family mono
-     :background "#f3f4f6"
-     :padding "1px 5px"
-     :border-radius "3px"
-     :font-size "12px"
-     :color "#374151"}}
-   s])
 
 (defn app []
   [:div
