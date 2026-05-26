@@ -31,6 +31,13 @@
     (wire-listener! new-ds-conn)
     (reset! db-state (ds/db new-ds-conn))))
 
+(defn update-schema! [conn schema-updates]
+  (let [current-db (ds/db @conn)
+        new-schema (merge (ds/schema current-db) schema-updates)]
+    (reset! conn
+            (ds/conn-from-db
+             (ds/init-db (ds/datoms current-db :eavt) new-schema)))))
+
 ;; -- SCI context --
 ;; Pre-requires datascript.core as d, binds conn atom directly.
 
@@ -49,9 +56,12 @@
                  'create-conn ds/create-conn
                  'empty-db ds/empty-db
                  'conn-from-db ds/conn-from-db
+                 'db-with ds/db-with
+                 'init-db ds/init-db
                  'schema ds/schema}}
                :bindings
-               {'conn conn}})]
+               {'conn conn
+                'update-schema! update-schema!}})]
     (sci/eval-string* ctx "(require '[datascript.core :as d])")
     ctx))
 
@@ -500,7 +510,8 @@
         [code-badge "d/pull"] " · "
         [code-badge "d/datoms"] " · "
         [code-badge "d/entity"] " · "
-        [code-badge "d/touch"]]]
+        [code-badge "d/touch"] " · "
+        [code-badge "update-schema!"]]]
       [:div
        {:style {:display "flex" :gap "8px"}}
        [:button

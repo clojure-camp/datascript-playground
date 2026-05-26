@@ -31,6 +31,14 @@
 ;; Pull *
 (d/pull (d/db @conn) '[*] 1)
 
+
+;; Pull within q
+(d/q '[:find [(pull ?e [:person/name
+                        {:person/friend [:person/name]}]) ...]
+       :where
+       [?e :person/name _]]
+     (d/db @conn))
+
 ;; All datoms
 (seq (d/datoms (d/db @conn) :eavt))
 
@@ -52,3 +60,6 @@
 ;; Retract attr
 (d/transact! @conn
              [[:db/retract 2 :person/age 25]])
+
+;; Change schema — add :person/email as a unique identity attribute
+(update-schema! conn {:person/email {:db/unique :db.unique/identity}})

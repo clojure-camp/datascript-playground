@@ -1,6 +1,7 @@
 (ns app.examples-macro
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]))
+  (:require
+   [clojure.java.io :as io]
+   [clojure.string :as str]))
 
 (defn- comment-label [line]
   (let [trimmed (str/trim line)]
