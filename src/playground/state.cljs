@@ -126,6 +126,8 @@
 (defn format-result [result]
   (let [s (pr-str result)]
     (cond
+      (record? result)
+      s
       (or (map? result) (sequential? result) (set? result))
       (try
         (zp/zprint-str result {:width 60
