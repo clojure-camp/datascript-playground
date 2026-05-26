@@ -401,6 +401,71 @@
      :color "#374151"}}
    s])
 
+(defn help-panel []
+  [:div
+   {:style
+    {:background "white"
+     :border-radius "8px"
+     :border "1px solid #e5e7eb"
+     :padding "16px 20px"
+     :margin-bottom "16px"}}
+   [:div
+    {:style
+     {:display "grid"
+      :grid-template-columns "1fr 1fr 1fr"
+      :gap "24px"}}
+    [:div
+     [:h3
+      {:style
+       {:font-size "11px"
+        :font-weight "600"
+        :color "#9ca3af"
+        :text-transform "uppercase"
+        :letter-spacing "0.08em"
+        :margin-bottom "8px"}}
+      "Environment"]
+     [:p
+      {:style {:font-size "12px" :color "#374151" :margin "0 0 6px" :line-height "1.6"}}
+      "Code runs in a " [:strong "SCI"] " (Small Clojure Interpreter) sandbox — a safe subset of Clojure. Most core fns are available."]
+     [:p
+      {:style {:font-size "12px" :color "#374151" :margin 0 :line-height "1.6"}}
+      "DataScript state persists across cells within a tab. Use " [code-badge "conn"] " to transact or query."]]
+    [:div
+     [:h3
+      {:style
+       {:font-size "11px"
+        :font-weight "600"
+        :color "#9ca3af"
+        :text-transform "uppercase"
+        :letter-spacing "0.08em"
+        :margin-bottom "8px"}}
+      "Available Bindings"]
+     [:div
+      {:style {:display "flex" :flex-wrap "wrap" :gap "4px"}}
+      (for [b ["conn" "d/q" "d/transact!" "d/pull" "d/pull-many"
+               "d/entity" "d/datoms" "d/touch" "d/db"
+               "d/create-conn" "d/empty-db" "d/conn-from-db"
+               "update-schema!"]]
+        [:span {:key b} [code-badge b]])]]
+    [:div
+     [:h3
+      {:style
+       {:font-size "11px"
+        :font-weight "600"
+        :color "#9ca3af"
+        :text-transform "uppercase"
+        :letter-spacing "0.08em"
+        :margin-bottom "8px"}}
+      "Editor"]
+     [:p {:style {:font-size "12px" :color "#374151" :margin "0 0 6px"}}
+      [code-badge "⌘+Enter"] " — evaluate cell"]
+     [:p {:style {:font-size "12px" :color "#374151" :margin "0 0 6px"}}
+      [code-badge "Tab"] " — format code (zprint)"]
+     [:p {:style {:font-size "12px" :color "#374151" :margin "0 0 6px" :line-height "1.6"}}
+      [:strong "Parinfer"] " keeps parentheses balanced as you type — indent to restructure."]
+     [:p {:style {:font-size "12px" :color "#374151" :margin 0 :line-height "1.6"}}
+      "Double-click a tab label to rename it."]]]])
+
 (defn notebook-panel []
   (let [{:keys [cells]} (s/active-tab)]
     [:div
@@ -415,34 +480,14 @@
         :justify-content "space-between"
         :align-items "center"
         :margin-bottom "8px"}}
-      [:div
-       {:style {:display "flex" :align-items "center" :gap "12px"}}
-       [:h2
-        {:style
-         {:font-size "11px"
-          :font-weight "600"
-          :color "#9ca3af"
-          :letter-spacing "0.08em"
-          :text-transform "uppercase"}}
-        "Notebook"]
-       [:p
-        {:style
-         {:font-size "12px"
-          :color "#9ca3af"
-          :display "flex"
-          :align-items "center"
-          :gap "4px"
-          :flex-wrap "wrap"
-          :margin 0}}
-        "Bindings: "
-        [code-badge "conn"] " · "
-        [code-badge "d/q"] " · "
-        [code-badge "d/transact!"] " · "
-        [code-badge "d/pull"] " · "
-        [code-badge "d/datoms"] " · "
-        [code-badge "d/entity"] " · "
-        [code-badge "d/touch"] " · "
-        [code-badge "update-schema!"]]]
+      [:h2
+       {:style
+        {:font-size "11px"
+         :font-weight "600"
+         :color "#9ca3af"
+         :letter-spacing "0.08em"
+         :text-transform "uppercase"}}
+       "Notebook"]
       [:div
        {:style {:display "flex" :gap "8px"}}
        [:button
@@ -497,45 +542,65 @@
         ^{:key id} [cell-view cell])]]))
 
 (defn app []
-  [:div
-   {:style
-    {:min-height "100vh"
-     :background "#f9fafb"
-     :padding "12px"}}
-   [:div
-    {:style
-     {:margin "0 auto"}}
+  (r/with-let [show-help? (r/atom false)]
     [:div
      {:style
-      {:display "flex"
-       :align-items "center"
-       :gap "12px"
-       :margin-bottom "12px"
-       :flex-wrap "wrap"}}
-     [:h1
-      {:style
-       {:font-size "20px"
-        :font-weight "700"
-        :color "#9ca3af"
-        :margin 0}}
-      "DataScript Playground"]
-     [:div {:style {:flex 1}}]
-     [tabs-bar]]
-    [:div
-     {:style
-      {:display "grid"
-       :grid-template-columns "28em 1fr"
-       :gap "20px"
-       :align-items "start"}}
+      {:min-height "100vh"
+       :background "#f9fafb"
+       :padding "12px"}}
      [:div
       {:style
-       {:display "flex"
-        :flex-direction "column"
-        :gap "20px"
-        :position "sticky"
-        :top "24px"
-        :align-self "start"}}
-      [schema-panel]
-      [datoms-panel]]
-     [notebook-panel]]]])
+       {:margin "0 auto"}}
+      [:div
+       {:style
+        {:display "flex"
+         :align-items "center"
+         :gap "8px"
+         :margin-bottom "12px"
+         :flex-wrap "wrap"}}
+       [:h1
+        {:style
+         {:font-size "20px"
+          :font-weight "700"
+          :color "#9ca3af"
+          :margin 0}}
+        "DataScript Playground"]
+       [:button
+        {:on-click (fn [_] (swap! show-help? not))
+         :title "Toggle help"
+         :style
+         {:background (if @show-help? "#e0e7ff" "transparent")
+          :color (if @show-help? "#4f46e5" "#9ca3af")
+          :border (str "1px solid " (if @show-help? "#c7d2fe" "#d1d5db"))
+          :border-radius "50%"
+          :width "20px"
+          :height "20px"
+          :font-size "11px"
+          :font-weight "700"
+          :cursor "pointer"
+          :line-height "1"
+          :padding 0
+          :flex-shrink 0}}
+        "?"]
+       [:div {:style {:flex 1}}]
+       [tabs-bar]]
+      (when @show-help?
+        [help-panel])
+      [:div
+       {:style
+        {:display "grid"
+         :grid-template-columns "28em 1fr"
+         :gap "20px"
+         :align-items "start"}}
+       [:div
+        {:style
+         {:display "flex"
+          :flex-direction "column"
+          :gap "20px"
+          :position "sticky"
+          :top "24px"
+          :align-self "start"}}
+        [schema-panel]
+        [datoms-panel]]
+       [notebook-panel]]]]))
 
