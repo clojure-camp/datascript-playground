@@ -122,7 +122,7 @@
 
 ;; Oldest person's age
 ;; Aggregate: max
-(d/q '[:find (max ?age)
+(d/q '[:find (max ?age) .
        :where
        [_ :person/age ?age]]
      (d/db @conn))
