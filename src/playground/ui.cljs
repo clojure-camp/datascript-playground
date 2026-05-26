@@ -256,69 +256,59 @@
             :flex 1}}])})))
 
 (defn cell-view [{:keys [id code result error]}]
-  [:div
-   {:style
-    {:display "grid"
-     :grid-template-columns "1fr 1fr"
-     :gap "16px"
-     :padding "12px 0"
-     :border-bottom "1px solid #f3f4f6"}}
+  [:<>
+   [:div
+    {:style
+     {:padding "12px 0"
+      :border-bottom "1px solid #f3f4f6"}}
+    [code-editor
+     {:value code
+      :on-change (fn [new-code]
+                   (s/update-active-tab!
+                     #(update % :cells s/update-cell id
+                              (fn [c] (assoc c :code new-code))))
+                   (s/ensure-trailing-blank!))
+      :on-run (fn [] (s/eval-cell! id))
+      :on-format (fn [] (s/format-cell! id))}]]
    [:div
     {:style
      {:display "flex"
       :flex-direction "column"
-      :gap "6px"}}
-    [:div
-     {:style
-      {:display "flex"
-       :gap "6px"
-       :align-items "flex-start"}}
-     [code-editor
-      {:value code
-       :on-change (fn [new-code]
-                    (s/update-active-tab!
-                      #(update % :cells s/update-cell id
-                               (fn [c] (assoc c :code new-code))))
-                    (s/ensure-trailing-blank!))
-       :on-run (fn [] (s/eval-cell! id))
-       :on-format (fn [] (s/format-cell! id))}]
-     [:div
-      {:style
-       {:display "flex"
-        :flex-direction "column"
-        :align-self "stretch"
-        :flex-shrink 0}}
-      [:button
-       {:on-mouse-down (fn [e] (.preventDefault e))
-        :on-click (fn [_] (s/eval-cell! id))
-        :title "Run (⌘+Enter)"
-        :style
-        {:background "#4f46e5"
-         :color "white"
-         :border "none"
-         :border-radius "4px"
-         :padding "5px 9px"
-         :cursor "pointer"
-         :font-size "13px"
-         :line-height "1"}}
-       "▶"]
-      [:div {:style {:flex-grow 1}}]
-      [:button
-       {:on-mouse-down (fn [e] (.preventDefault e))
-        :on-click (fn [_] (s/delete-cell! id))
-        :title "Delete cell"
-        :style
-        {:background "transparent"
-         :color "#9ca3af"
-         :border "none"
-         :border-radius "4px"
-         :padding "5px 9px"
-         :cursor "pointer"
-         :font-size "13px"
-         :line-height "1"}}
-       "🗑"]]]
-]
+      :padding "12px 0"
+      :border-bottom "1px solid #f3f4f6"}}
+    [:button
+     {:on-mouse-down (fn [e] (.preventDefault e))
+      :on-click (fn [_] (s/eval-cell! id))
+      :title "Run (⌘+Enter)"
+      :style
+      {:background "#4f46e5"
+       :color "white"
+       :border "none"
+       :border-radius "4px"
+       :padding "5px 9px"
+       :cursor "pointer"
+       :font-size "13px"
+       :line-height "1"}}
+     "▶"]
+    [:div {:style {:flex-grow 1}}]
+    [:button
+     {:on-mouse-down (fn [e] (.preventDefault e))
+      :on-click (fn [_] (s/delete-cell! id))
+      :title "Delete cell"
+      :style
+      {:background "transparent"
+       :color "#9ca3af"
+       :border "none"
+       :border-radius "4px"
+       :padding "5px 9px"
+       :cursor "pointer"
+       :font-size "13px"
+       :line-height "1"}}
+     "🗑"]]
    [:div
+    {:style
+     {:padding "12px 0"
+      :border-bottom "1px solid #f3f4f6"}}
     [result-view {:result result :error error}]]])
 
 (defn tabs-bar []
@@ -476,26 +466,29 @@
      [:div
       {:style
        {:display "grid"
-        :grid-template-columns "1fr 1fr"
-        :gap "16px"
-        :padding-bottom "6px"
-        :border-bottom "2px solid #f3f4f6"}}
+        :grid-template-columns "1fr auto 1fr"
+        :column-gap "16px"}}
       [:span
        {:style
         {:font-size "11px"
          :font-weight "500"
          :color "#9ca3af"
-         :font-family mono}}
+         :font-family mono
+         :padding-bottom "6px"
+         :border-bottom "2px solid #f3f4f6"}}
        "Code"]
+      [:div {:style {:border-bottom "2px solid #f3f4f6"}}]
       [:span
        {:style
         {:font-size "11px"
          :font-weight "500"
          :color "#9ca3af"
-         :font-family mono}}
-       "Result"]]
-     (for [{:keys [id] :as cell} cells]
-       ^{:key id} [cell-view cell])]))
+         :font-family mono
+         :padding-bottom "6px"
+         :border-bottom "2px solid #f3f4f6"}}
+       "Result"]
+      (for [{:keys [id] :as cell} cells]
+        ^{:key id} [cell-view cell])]]))
 
 (defn app []
   [:div
