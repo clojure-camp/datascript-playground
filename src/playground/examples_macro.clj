@@ -1,16 +1,16 @@
-(ns app.examples-macro
+(ns playground.examples-macro
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
-(defn- comment-label [line]
+(defn comment-label [line]
   (let [trimmed (str/trim line)]
     (when (str/starts-with? trimmed ";;")
       (str/trim (subs trimmed 2)))))
 
 ;; Code before the first ";;" label is intentionally ignored — use it for
 ;; setup definitions that should not appear as named examples.
-(defn- parse-examples [content]
+(defn parse-examples [content]
   (loop [[line & rest-lines] (str/split-lines content)
          current-label nil
          current-code []
@@ -33,12 +33,12 @@
       :else
       (recur rest-lines current-label (conj current-code line) examples))))
 
-(defn- filename->label [filename]
+(defn filename->label [filename]
   (->> (str/split filename #"[-_]")
        (map str/capitalize)
        (str/join " ")))
 
-(defn- file->set [file]
+(defn file->set [file]
   (let [name (str/replace (.getName file) #"\.cljc$" "")]
     {:id (keyword name)
      :label (filename->label name)
