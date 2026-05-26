@@ -12,12 +12,18 @@
 
 (defonce db-state (r/atom (ds/db @conn)))
 
+(defonce db-history (r/atom []))
+(defonce db-history-idx (r/atom 0))
+
 (defn wire-listener! [ds-conn]
   (ds/listen! ds-conn ::watcher
     (fn [{:keys [db-after]}]
-      (reset! db-state db-after))))
+      (reset! db-state db-after)
+      (let [new-hist (swap! db-history conj db-after)]
+        (reset! db-history-idx (dec (count new-hist)))))))
 
 (wire-listener! @conn)
+(reset! db-history [(ds/db @conn)])
 
 (add-watch conn ::conn-swap
   (fn [_ _ old-ds-conn new-ds-conn]
@@ -27,23 +33,31 @@
 
 (defn update-schema! [conn schema-updates]
   (let [current-db (ds/db @conn)
-        new-schema (merge (ds/schema current-db) schema-updates)]
-    (reset! conn
-            (ds/conn-from-db
-             (ds/init-db (ds/datoms current-db :eavt) new-schema)))))
+        new-schema (merge (ds/schema current-db) schema-updates)
+        new-db (ds/init-db (ds/datoms current-db :eavt) new-schema)]
+    (reset! conn (ds/conn-from-db new-db))
+    (swap! db-history
+           (fn [h]
+             (if (empty? h)
+               [new-db]
+               (assoc h (dec (count h)) new-db))))))
 
-(defn db->snapshot []
-  (let [db (ds/db @conn)]
-    {:schema (ds/schema db)
-     :eavs (->> (ds/datoms db :eavt)
-                (remove (fn [d] (= (:a d) :db/txInstant)))
-                (mapv (fn [d] [(:e d) (:a d) (:v d)])))}))
+(defn db->snapshot
+  ([] (db->snapshot (ds/db @conn)))
+  ([db]
+   {:schema (ds/schema db)
+    :eavs (->> (ds/datoms db :eavt)
+               (remove (fn [d] (= (:a d) :db/txInstant)))
+               (mapv (fn [d] [(:e d) (:a d) (:v d)])))}))
 
 (defn snapshot->conn [{:keys [schema eavs]}]
   (let [c (ds/create-conn schema)]
     (when (seq eavs)
       (ds/transact! c (mapv (fn [[e a v]] (assoc {a v} :db/id e)) eavs)))
     c))
+
+(defn snapshot->db [snapshot]
+  (ds/db (snapshot->conn snapshot)))
 
 ;; -- SCI context --
 ;; Pre-requires datascript.core as d, binds conn atom directly.
@@ -206,10 +220,10 @@
             (fn [tabs]
               (mapv (fn [tab]
                       (-> tab
-                          (assoc :db-snapshot
-                                 (if (= (:id tab) active-id)
-                                   (db->snapshot)
-                                   (:db-snapshot tab)))
+                          (cond-> (= (:id tab) active-id)
+                            (assoc :db-history-snapshots (mapv db->snapshot @db-history)
+                                   :db-history-idx @db-history-idx))
+                          (dissoc :db-snapshot)
                           (update :cells (fn [cells]
                                            (mapv #(select-keys % [:id :code]) cells)))))
                     tabs)))))
@@ -234,25 +248,35 @@
           (:examples example-set))))
 
 (defn switch-tab! [tab-id]
-  (let [snapshot (db->snapshot)]
+  (let [history-snaps (mapv db->snapshot @db-history)
+        history-idx @db-history-idx]
     (swap! tabs-state
            (fn [{:keys [active-tab-id] :as state}]
              (-> state
                  (update :tabs (fn [tabs]
                                  (mapv (fn [tab]
                                          (if (= (:id tab) active-tab-id)
-                                           (assoc tab :db-snapshot snapshot)
+                                           (assoc tab
+                                                  :db-history-snapshots history-snaps
+                                                  :db-history-idx history-idx)
                                            tab))
                                        tabs)))
                  (assoc :active-tab-id tab-id))))
-    (let [new-tab (first (filter (fn [t] (= (:id t) tab-id)) (:tabs @tabs-state)))]
-      (reset! conn (if-let [snap (:db-snapshot new-tab)]
-                     (snapshot->conn snap)
+    (let [new-tab (first (filter (fn [t] (= (:id t) tab-id)) (:tabs @tabs-state)))
+          snaps (or (:db-history-snapshots new-tab)
+                    (when-let [s (:db-snapshot new-tab)] [s])
+                    [])
+          idx (or (:db-history-idx new-tab) (max 0 (dec (count snaps))))]
+      (reset! db-history (mapv snapshot->db snaps))
+      (reset! db-history-idx idx)
+      (reset! conn (if (seq snaps)
+                     (snapshot->conn (last snaps))
                      (ds/create-conn))))
     (ensure-trailing-blank!)))
 
 (defn add-tab! [set-id]
-  (let [snapshot (db->snapshot)
+  (let [history-snaps (mapv db->snapshot @db-history)
+        history-idx @db-history-idx
         tab-id (new-tab-id!)
         [label cells] (if (nil? set-id)
                         [(str "Tab " tab-id) [(new-cell)]]
@@ -266,12 +290,16 @@
                  (update :tabs (fn [tabs]
                                  (mapv (fn [tab]
                                          (if (= (:id tab) active-tab-id)
-                                           (assoc tab :db-snapshot snapshot)
+                                           (assoc tab
+                                                  :db-history-snapshots history-snaps
+                                                  :db-history-idx history-idx)
                                            tab))
                                        tabs)))
-                 (update :tabs conj {:id tab-id :label label :cells cells :db-snapshot nil})
+                 (update :tabs conj {:id tab-id :label label :cells cells})
                  (assoc :active-tab-id tab-id))))
     (reset! conn (ds/create-conn))
+    (reset! db-history [(ds/db @conn)])
+    (reset! db-history-idx 0)
     (ensure-trailing-blank!)))
 
 (defn remove-tab! [tab-id]
@@ -284,9 +312,15 @@
                             active-tab-id)]
         (swap! tabs-state assoc :tabs remaining :active-tab-id new-active-id)
         (when (= active-tab-id tab-id)
-          (let [new-active (first (filter (fn [t] (= (:id t) new-active-id)) remaining))]
-            (reset! conn (if-let [snap (:db-snapshot new-active)]
-                           (snapshot->conn snap)
+          (let [new-active (first (filter (fn [t] (= (:id t) new-active-id)) remaining))
+                snaps (or (:db-history-snapshots new-active)
+                          (when-let [s (:db-snapshot new-active)] [s])
+                          [])
+                restore-idx (or (:db-history-idx new-active) (max 0 (dec (count snaps))))]
+            (reset! db-history (mapv snapshot->db snaps))
+            (reset! db-history-idx restore-idx)
+            (reset! conn (if (seq snaps)
+                           (snapshot->conn (last snaps))
                            (ds/create-conn)))))))))
 
 (defn rename-tab! [tab-id new-label]
@@ -310,11 +344,15 @@
       (when (seq all-tab-ids)
         (reset! next-tab-id (apply max all-tab-ids))))
     (let [active-id (:active-tab-id saved)
-          active (first (filter (fn [t] (= (:id t) active-id)) (:tabs saved)))]
-      (when active
-        (reset! conn (if-let [snap (:db-snapshot active)]
-                          (snapshot->conn snap)
-                          (ds/create-conn)))))
+          active (first (filter (fn [t] (= (:id t) active-id)) (:tabs saved)))
+          snaps (or (:db-history-snapshots active)
+                    (when-let [s (:db-snapshot active)] [s])
+                    [])
+          idx (or (:db-history-idx active) (max 0 (dec (count snaps))))]
+      (when (seq snaps)
+        (reset! db-history (mapv snapshot->db snaps))
+        (reset! db-history-idx idx)
+        (reset! conn (snapshot->conn (last snaps)))))
     (reset! tabs-state
             (update saved :tabs
                     (fn [tabs]

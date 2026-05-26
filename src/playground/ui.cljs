@@ -81,25 +81,84 @@
 
 
 (defn datoms-panel []
-  (let [db @s/db-state
+  (let [history @s/db-history
+        idx @s/db-history-idx
+        history-count (count history)
+        at-latest? (or (zero? history-count) (= idx (dec history-count)))
+        db (or (get history idx) @s/db-state)
         datoms (ds/datoms db :eavt)]
     [:div
      {:style
       {:background "white"
        :border-radius "8px"
-       :border "1px solid #e5e7eb"
+       :border (if at-latest? "1px solid #e5e7eb" "1px solid #fcd34d")
        :padding "16px"
        :overflow "auto"
        :max-height "calc(100vh - 120px)"}}
-     [:h2
-      {:style
-       {:font-size "11px"
-        :font-weight "600"
-        :color "#9ca3af"
-        :letter-spacing "0.08em"
-        :text-transform "uppercase"
-        :margin-bottom "12px"}}
-      (str "Datoms (" (count datoms) ")")]
+     [:div
+      {:style {:display "flex" :align-items "center" :margin-bottom "8px"}}
+      [:h2
+       {:style
+        {:font-size "11px"
+         :font-weight "600"
+         :color "#9ca3af"
+         :letter-spacing "0.08em"
+         :text-transform "uppercase"
+         :margin 0}}
+       (str "Datoms (" (count datoms) ")")]
+      (when (not at-latest?)
+        [:span
+         {:style
+          {:margin-left "8px"
+           :font-size "10px"
+           :color "#92400e"
+           :background "#fef3c7"
+           :padding "1px 6px"
+           :border-radius "3px"
+           :font-family mono}}
+         "historical"])
+      [:span
+       {:style
+        {:margin-left "auto"
+         :font-size "11px"
+         :color "#9ca3af"
+         :font-family mono}}
+       (str (inc idx) " / " history-count)]]
+     [:div
+      {:style {:display "flex" :align-items "center" :gap "6px" :margin-bottom "12px"}}
+      [:button
+       {:on-click (fn [_] (swap! s/db-history-idx (fn [i] (max 0 (dec i)))))
+        :disabled (= idx 0)
+        :style
+        {:background "none"
+         :border "1px solid #e5e7eb"
+         :border-radius "4px"
+         :padding "1px 8px"
+         :cursor (if (= idx 0) "not-allowed" "pointer")
+         :font-family mono
+         :font-size "12px"
+         :color (if (= idx 0) "#d1d5db" "#374151")}}
+       "‹"]
+      [:input
+       {:type "range"
+        :min "0"
+        :max (str (max 0 (dec history-count)))
+        :value (str idx)
+        :style {:flex "1" :cursor "pointer" :accent-color "#3b82f6"}
+        :on-change (fn [e] (reset! s/db-history-idx (js/parseInt (.. e -target -value))))}]
+      [:button
+       {:on-click (fn [_] (swap! s/db-history-idx (fn [i] (min (dec history-count) (inc i)))))
+        :disabled (= idx (dec history-count))
+        :style
+        {:background "none"
+         :border "1px solid #e5e7eb"
+         :border-radius "4px"
+         :padding "1px 8px"
+         :cursor (if (= idx (dec history-count)) "not-allowed" "pointer")
+         :font-family mono
+         :font-size "12px"
+         :color (if (= idx (dec history-count)) "#d1d5db" "#374151")}}
+       "›"]]
      [:table
       {:style
        {:width "100%"
