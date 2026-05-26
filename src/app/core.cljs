@@ -124,7 +124,9 @@
         code (:code cell)]
     (when (seq code)
       (try
-        (let [formatted (zp/zprint-str code {:parse-string? true})]
+        (let [formatted (zp/zprint-str code {:parse-string-all? true
+                                              :width 50
+                                              :style :respect-nl})]
           (swap! repl-state update :cells update-cell id #(assoc % :code formatted)))
         (catch :default _)))))
 
@@ -350,7 +352,7 @@
 
     :else nil))
 
-(defn code-editor [{:keys [value on-change on-run]}]
+(defn code-editor [{:keys [value on-change on-run on-format]}]
   (let [!view (atom nil)
         !container (atom nil)]
     (r/create-class
@@ -371,7 +373,9 @@
                               (.of keymap (.concat defaultKeymap historyKeymap))
                               (.highest Prec
                                 (.of keymap #js [#js {:key "Mod-Enter"
-                                                      :run (fn [] (on-run) true)}]))
+                                                      :run (fn [] (on-run) true)}
+                                                #js {:key "Tab"
+                                                     :run (fn [] (on-format) true)}]))
                               EditorView.lineWrapping
                               (EditorView.theme
                                 #js {"&.cm-focused" #js {"outline" "none"}
@@ -437,7 +441,8 @@
                     (swap! repl-state update :cells update-cell id
                            #(assoc % :code new-code))
                     (ensure-trailing-blank!))
-       :on-run (fn [] (eval-cell! id))}]
+       :on-run (fn [] (eval-cell! id))
+       :on-format (fn [] (format-cell! id))}]
      [:button
       {:on-mouse-down (fn [e] (.preventDefault e))
        :on-click (fn [_] (eval-cell! id))
@@ -454,19 +459,7 @@
         :flex-shrink 0
         :align-self "flex-start"}}
       "▶"]]
-    [:div
-     {:style {:display "flex" :justify-content "flex-end"}}
-     [:button
-      {:on-click (fn [_] (format-cell! id))
-       :style
-       {:background "white"
-        :color "#6b7280"
-        :border "1px solid #e5e7eb"
-        :border-radius "4px"
-        :padding "3px 8px"
-        :font-size "11px"
-        :cursor "pointer"}}
-      "Format"]]]
+]
    [:div
     [result-view {:result result :error error}]]])
 
