@@ -125,8 +125,9 @@
     (when (seq code)
       (try
         (let [formatted (zp/zprint-str code {:parse-string-all? true
-                                              :width 50
-                                              :style :respect-nl})]
+                                             :width 60
+                                             :map {:comma? false}
+                                             :style :respect-nl})]
           (swap! repl-state update :cells update-cell id #(assoc % :code formatted)))
         (catch :default _)))))
 
@@ -384,7 +385,9 @@
                                                         "fontSize" "13px"
                                                         "lineHeight" "1.6"
                                                         "color" "#1f2937"
-                                                        "minHeight" "108px"}
+                                                        "boxSizing" "content-box"
+                                                        "minHeight" "108px"
+                                                        "minWidth" "60ch"}
                                      ".cm-line" #js {"padding" "0"}})
                               (.of EditorView.updateListener
                                 (fn [^js upd]
@@ -590,11 +593,10 @@
    {:style
     {:min-height "100vh"
      :background "#f9fafb"
-     :padding "24px"}}
+     :padding "12px"}}
    [:div
     {:style
-     {:max-width "1400px"
-      :margin "0 auto"}}
+     {:margin "0 auto"}}
     [:div
      {:style
       {:display "flex"
