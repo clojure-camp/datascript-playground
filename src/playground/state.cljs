@@ -114,7 +114,7 @@
     (cond
       (or (map? result) (sequential? result) (set? result))
       (try
-        (zp/zprint-str s {:width 60
+        (zp/zprint-str result {:width 60
                           :map {:comma? false}
                           :style :respect-nl})
         (catch :default _ s))
