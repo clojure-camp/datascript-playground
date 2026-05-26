@@ -282,22 +282,41 @@
                     (s/ensure-trailing-blank!))
        :on-run (fn [] (s/eval-cell! id))
        :on-format (fn [] (s/format-cell! id))}]
-     [:button
-      {:on-mouse-down (fn [e] (.preventDefault e))
-       :on-click (fn [_] (s/eval-cell! id))
-       :title "Run (⌘+Enter)"
-       :style
-       {:background "#4f46e5"
-        :color "white"
-        :border "none"
-        :border-radius "4px"
-        :padding "5px 9px"
-        :cursor "pointer"
-        :font-size "13px"
-        :line-height "1"
-        :flex-shrink 0
-        :align-self "flex-start"}}
-      "▶"]]
+     [:div
+      {:style
+       {:display "flex"
+        :flex-direction "column"
+        :align-self "stretch"
+        :flex-shrink 0}}
+      [:button
+       {:on-mouse-down (fn [e] (.preventDefault e))
+        :on-click (fn [_] (s/eval-cell! id))
+        :title "Run (⌘+Enter)"
+        :style
+        {:background "#4f46e5"
+         :color "white"
+         :border "none"
+         :border-radius "4px"
+         :padding "5px 9px"
+         :cursor "pointer"
+         :font-size "13px"
+         :line-height "1"}}
+       "▶"]
+      [:div {:style {:flex-grow 1}}]
+      [:button
+       {:on-mouse-down (fn [e] (.preventDefault e))
+        :on-click (fn [_] (s/delete-cell! id))
+        :title "Delete cell"
+        :style
+        {:background "transparent"
+         :color "#9ca3af"
+         :border "none"
+         :border-radius "4px"
+         :padding "5px 9px"
+         :cursor "pointer"
+         :font-size "13px"
+         :line-height "1"}}
+       "🗑"]]]
 ]
    [:div
     [result-view {:result result :error error}]]])

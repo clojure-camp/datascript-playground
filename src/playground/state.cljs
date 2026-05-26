@@ -190,6 +190,11 @@
                  cells
                  (conj cells (new-cell)))))))
 
+(defn delete-cell! [id]
+  (update-active-tab!
+    #(update % :cells (fn [cells] (vec (remove (fn [c] (= (:id c) id)) cells)))))
+  (ensure-trailing-blank!))
+
 ;; -- Storage --
 
 (def storage-key "datascript-playground-tabs")
