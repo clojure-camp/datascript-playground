@@ -1,5 +1,6 @@
 (ns app.core
   (:require
+   [cljs.reader :as reader]
    [clojure.string :as str]
    [app.examples :as examples]
    [datascript.core :as ds]
@@ -40,6 +41,20 @@
             (ds/conn-from-db
              (ds/init-db (ds/datoms current-db :eavt) new-schema)))))
 
+(defn- db->snapshot []
+  (let [db (ds/db @conn)]
+    {:schema (ds/schema db)
+     :eavs (->> (ds/datoms db :eavt)
+                (remove (fn [d] (= (:a d) :db/txInstant)))
+                (mapv (fn [d] [(:e d) (:a d) (:v d)])))}))
+
+
+(defn- snapshot->conn [{:keys [schema eavs]}]
+  (let [c (ds/create-conn schema)]
+    (when (seq eavs)
+      (ds/transact! c (mapv (fn [[e a v]] (assoc {a v} :db/id e)) eavs)))
+    c))
+
 ;; -- SCI context --
 ;; Pre-requires datascript.core as d, binds conn atom directly.
 
@@ -77,45 +92,61 @@
   ([] (new-cell ""))
   ([code] {:id (new-id!) :code code :result nil :error nil}))
 
-(defonce repl-state
-  (r/atom {:cells [(new-cell)]}))
+(defonce next-tab-id (atom 1))
+
+(defn- new-tab-id! [] (swap! next-tab-id inc))
+
+(defonce tabs-state
+  (r/atom {:active-tab-id 1
+           :tabs [{:id 1 :label "Tab 1" :cells [(new-cell)] :db-snapshot nil}]}))
+
+;; -- Tab helpers --
+
+(defn- active-tab []
+  (let [{:keys [tabs active-tab-id]} @tabs-state]
+    (first (filter (fn [t] (= (:id t) active-tab-id)) tabs))))
+
+(defn- update-active-tab! [f]
+  (swap! tabs-state
+         (fn [{:keys [active-tab-id] :as state}]
+           (update state :tabs
+                   (fn [tabs]
+                     (mapv (fn [tab]
+                             (if (= (:id tab) active-tab-id)
+                               (f tab)
+                               tab))
+                           tabs))))))
 
 ;; -- Cell operations --
 
 (defn format-result [result]
-  (cond
-    (nil? result)
-    "nil"
-
-    ;; TxReport — avoid dumping full db objects
-    (:db-after result)
-    (str "TxReport {\n  :tx-data "
-         (pr-str (vec (:tx-data result)))
-         "\n  :tempids "
-         (pr-str (:tempids result))
-         "\n}")
-
-    :else
-    (let [s (pr-str result)]
-      (if (> (count s) 4000)
-        (str (subs s 0 4000) "\n;; … (truncated)")
-        s))))
+  (let [s (pr-str result)]
+    (cond
+      (or (map? result) (sequential? result) (set? result))
+      (try
+        (zp/zprint-str s {:width 60
+                          :map {:comma? false}
+                          :style :respect-nl})
+        (catch :default _ s))
+      :else s)))
 
 (defn- update-cell [cells id f]
   (mapv (fn [c] (if (= (:id c) id) (f c) c)) cells))
 
 (defn eval-cell! [id]
-  (let [cell (->> (:cells @repl-state)
+  (let [cell (->> (:cells (active-tab))
                   (filter (fn [c] (= (:id c) id)))
                   first)
         code (:code cell)]
     (try
       (let [result (sci/eval-string* sci-ctx code)]
-        (swap! repl-state update :cells update-cell id
-               #(assoc % :result (format-result result) :error nil)))
+        (update-active-tab!
+          #(update % :cells update-cell id
+                   (fn [c] (assoc c :result (format-result result) :error nil)))))
       (catch :default e
-        (swap! repl-state update :cells update-cell id
-               #(assoc % :result nil :error (.-message e)))))))
+        (update-active-tab!
+          #(update % :cells update-cell id
+                   (fn [c] (assoc c :result nil :error (.-message e)))))))))
 
 (defn- format-code [code]
   (try
@@ -126,19 +157,20 @@
     (catch :default _ code)))
 
 (defn format-cell! [id]
-  (let [cell (->> (:cells @repl-state)
+  (let [cell (->> (:cells (active-tab))
                   (filter (fn [c] (= (:id c) id)))
                   first)
         code (:code cell)]
     (when (seq code)
-      (swap! repl-state update :cells update-cell id #(assoc % :code (format-code code))))))
+      (update-active-tab!
+        #(update % :cells update-cell id (fn [c] (assoc c :code (format-code code))))))))
 
 (defn run-all! []
-  (doseq [{:keys [id]} (:cells @repl-state)]
+  (doseq [{:keys [id]} (:cells (active-tab))]
     (eval-cell! id)))
 
 (defn download-cells! []
-  (let [codes (->> (:cells @repl-state)
+  (let [codes (->> (:cells (active-tab))
                    (map :code)
                    (filter seq))
         content (str "(require '[datascript.core :as d])\n\n"
@@ -161,23 +193,118 @@
     (.revokeObjectURL js/URL url)))
 
 (defn- ensure-trailing-blank! []
-  (swap! repl-state update :cells
-         (fn [cells]
-           (if (empty? (:code (last cells)))
-             cells
-             (conj cells (new-cell))))))
+  (update-active-tab!
+    #(update % :cells
+             (fn [cells]
+               (if (empty? (:code (last cells)))
+                 cells
+                 (conj cells (new-cell)))))))
 
-(defn load-example-set! [set-id]
-  (if (nil? set-id)
-    (swap! repl-state assoc :cells [(new-cell)])
-    (let [example-set (->> examples/sets
-                           (filter (fn [s] (= (:id s) set-id)))
-                           first)
-          cells (mapv (fn [{:keys [label code]}]
-                        (new-cell (format-code (str ";; " label "\n" code))))
-                      (:examples example-set))]
-      (swap! repl-state assoc :cells cells)))
-  (ensure-trailing-blank!))
+;; -- Storage --
+
+(def ^:private storage-key "datascript-playground-tabs")
+
+(defn- storable-state []
+  (let [state @tabs-state
+        active-id (:active-tab-id state)]
+    (update state :tabs
+            (fn [tabs]
+              (mapv (fn [tab]
+                      (-> tab
+                          (assoc :db-snapshot
+                                 (if (= (:id tab) active-id)
+                                   (db->snapshot)
+                                   (:db-snapshot tab)))
+                          (update :cells (fn [cells]
+                                           (mapv #(select-keys % [:id :code]) cells)))))
+                    tabs)))))
+
+(defn- save-to-storage! []
+  (.setItem js/localStorage storage-key (pr-str (storable-state))))
+
+(defn- load-from-storage []
+  (when-let [raw (.getItem js/localStorage storage-key)]
+    (try
+      (reader/read-string raw)
+      (catch :default _ nil))))
+
+;; -- Tab management --
+
+(defn- cells-for-set [set-id]
+  (let [example-set (->> examples/sets
+                         (filter (fn [s] (= (:id s) set-id)))
+                         first)]
+    (mapv (fn [{:keys [label code]}]
+            (new-cell (format-code (str ";; " label "\n" code))))
+          (:examples example-set))))
+
+(defn switch-tab! [tab-id]
+  (let [snapshot (db->snapshot)]
+    (swap! tabs-state
+           (fn [{:keys [active-tab-id] :as state}]
+             (-> state
+                 (update :tabs (fn [tabs]
+                                 (mapv (fn [tab]
+                                         (if (= (:id tab) active-tab-id)
+                                           (assoc tab :db-snapshot snapshot)
+                                           tab))
+                                       tabs)))
+                 (assoc :active-tab-id tab-id))))
+    (let [new-tab (first (filter (fn [t] (= (:id t) tab-id)) (:tabs @tabs-state)))]
+      (reset! conn (if-let [snap (:db-snapshot new-tab)]
+                     (snapshot->conn snap)
+                     (ds/create-conn))))
+    (ensure-trailing-blank!)))
+
+(defn add-tab! [set-id]
+  (let [snapshot (db->snapshot)
+        tab-id (new-tab-id!)
+        [label cells] (if (nil? set-id)
+                        [(str "Tab " tab-id) [(new-cell)]]
+                        (let [example-set (->> examples/sets
+                                               (filter (fn [s] (= (:id s) set-id)))
+                                               first)]
+                          [(:label example-set) (cells-for-set set-id)]))]
+    (swap! tabs-state
+           (fn [{:keys [active-tab-id] :as state}]
+             (-> state
+                 (update :tabs (fn [tabs]
+                                 (mapv (fn [tab]
+                                         (if (= (:id tab) active-tab-id)
+                                           (assoc tab :db-snapshot snapshot)
+                                           tab))
+                                       tabs)))
+                 (update :tabs conj {:id tab-id :label label :cells cells :db-snapshot nil})
+                 (assoc :active-tab-id tab-id))))
+    (reset! conn (ds/create-conn))
+    (ensure-trailing-blank!)))
+
+(defn remove-tab! [tab-id]
+  (let [{:keys [tabs active-tab-id]} @tabs-state]
+    (when (> (count tabs) 1)
+      (let [idx (first (keep-indexed (fn [i t] (when (= (:id t) tab-id) i)) tabs))
+            remaining (filterv (fn [t] (not= (:id t) tab-id)) tabs)
+            new-active-id (if (= active-tab-id tab-id)
+                            (:id (or (get tabs (inc idx)) (get tabs (dec idx))))
+                            active-tab-id)]
+        (swap! tabs-state assoc :tabs remaining :active-tab-id new-active-id)
+        (when (= active-tab-id tab-id)
+          (let [new-active (first (filter (fn [t] (= (:id t) new-active-id)) remaining))]
+            (reset! conn (if-let [snap (:db-snapshot new-active)]
+                           (snapshot->conn snap)
+                           (ds/create-conn)))))))))
+
+(defn rename-tab! [tab-id new-label]
+  (swap! tabs-state update :tabs
+         (fn [tabs]
+           (mapv (fn [tab]
+                   (if (= (:id tab) tab-id)
+                     (assoc tab :label new-label)
+                     tab))
+                 tabs))))
+
+(add-watch tabs-state ::storage (fn [_ _ _ _] (save-to-storage!)))
+(add-watch db-state ::storage (fn [_ _ _ _] (save-to-storage!)))
 
 ;; -- Styles --
 
@@ -203,20 +330,15 @@
         :text-transform "uppercase"
         :margin-bottom "12px"}}
       "Schema"]
-     (if (empty? schema)
+     (if (empty? attrs)
        [:p
-        {:style
-         {:font-size "12px"
-          :color "#9ca3af"
-          :font-family mono}}
-        "No schema defined"]
+        {:style {:font-size "12px" :color "#9ca3af" :font-style "italic"}}
+        "No schema defined yet"]
        [:table
-        {:style
-         {:width "100%"
-          :border-collapse "collapse"}}
+        {:style {:width "100%" :border-collapse "collapse"}}
         [:thead
          [:tr
-          (for [label ["Attribute" "Properties"]]
+          (for [label ["Attribute" "Type" "Cardinality"]]
             [:th
              {:key label
               :style
@@ -234,18 +356,25 @@
             {:key (str attr)}
             [:td
              {:style
-              {:padding "3px 8px"
+              {:padding "4px 8px"
                :color "#2563eb"
                :font-family mono
                :font-size "12px"}}
              (str attr)]
             [:td
              {:style
-              {:padding "3px 8px"
+              {:padding "4px 8px"
                :font-family mono
                :font-size "12px"
                :color "#374151"}}
-             (zp/zprint-str (get schema attr))]])]])]))
+             (-> schema (get attr) :db/valueType str (str/replace #"^:db.type/" ""))]
+            [:td
+             {:style
+              {:padding "4px 8px"
+               :font-family mono
+               :font-size "12px"
+               :color "#374151"}}
+             (-> schema (get attr) :db/cardinality str (str/replace #"^:db.cardinality/" ""))]])]])]))
 
 (defn datoms-panel []
   (let [db @db-state
@@ -445,8 +574,9 @@
      [code-editor
       {:value code
        :on-change (fn [new-code]
-                    (swap! repl-state update :cells update-cell id
-                           #(assoc % :code new-code))
+                    (update-active-tab!
+                      #(update % :cells update-cell id
+                               (fn [c] (assoc c :code new-code))))
                     (ensure-trailing-blank!))
        :on-run (fn [] (eval-cell! id))
        :on-format (fn [] (format-cell! id))}]
@@ -470,23 +600,78 @@
    [:div
     [result-view {:result result :error error}]]])
 
-(defn example-selector []
-  [:select
-   {:on-change (fn [e]
-                 (let [v (.. e -target -value)]
-                   (load-example-set! (when (seq v) (keyword v)))))
-    :style
-    {:font-size "13px"
-     :border "1px solid #d1d5db"
-     :border-radius "6px"
-     :padding "5px 10px"
-     :background "white"
-     :color "#374151"
-     :cursor "pointer"}}
-   [:option {:value ""} "Blank"]
-   (for [{:keys [id label]} examples/sets]
-     [:option {:key (str id) :value (name id)} label])])
-
+(defn tabs-bar []
+  (let [template (r/atom "")]
+    (fn []
+      (let [{:keys [tabs active-tab-id]} @tabs-state]
+        [:div
+         {:style
+          {:display "flex"
+           :align-items "center"
+           :gap "6px"
+           :flex-wrap "wrap"}}
+         (for [{:keys [id label]} tabs]
+           [:div
+            {:key (str id)
+             :on-click (fn [_] (when (not= id active-tab-id) (switch-tab! id)))
+             :style
+             {:display "flex"
+              :align-items "center"
+              :gap "4px"
+              :background (if (= id active-tab-id) "white" "#f3f4f6")
+              :border (str "1px solid " (if (= id active-tab-id) "#6366f1" "#d1d5db"))
+              :border-radius "6px"
+              :padding "5px 10px"
+              :font-size "13px"
+              :font-weight (if (= id active-tab-id) "600" "400")
+              :color (if (= id active-tab-id) "#4f46e5" "#374151")
+              :cursor (if (= id active-tab-id) "default" "pointer")
+              :user-select "none"}}
+            [:span
+             {:on-double-click (fn [e]
+                                 (.stopPropagation e)
+                                 (when-let [new-label (js/prompt "Rename tab:" label)]
+                                   (when (seq new-label)
+                                     (rename-tab! id new-label))))}
+             label]
+            (when (> (count tabs) 1)
+              [:span
+               {:on-click (fn [e]
+                            (.stopPropagation e)
+                            (remove-tab! id))
+                :style
+                {:color "#9ca3af"
+                 :font-size "15px"
+                 :line-height "1"
+                 :cursor "pointer"
+                 :padding "0 1px"
+                 :margin-left "4px"}}
+               "×"])])
+         [:div
+          {:style
+           {:margin-left "auto"
+            :display "flex"
+            :align-items "center"
+            :gap "6px"}}
+          [:select
+           {:value @template
+            :on-change (fn [e]
+                         (let [v (.. e -target -value)]
+                           (when (seq v)
+                             (add-tab! (when (not= v "blank") (keyword v)))
+                             (reset! template ""))))
+            :style
+            {:font-size "13px"
+             :border "1px solid #d1d5db"
+             :border-radius "6px"
+             :padding "5px 10px"
+             :background "white"
+             :color "#374151"
+             :cursor "pointer"}}
+           [:option {:value ""} "Add Tab..."]
+           [:option {:value "blank"} "Blank"]
+           (for [{:keys [id label]} examples/sets]
+             [:option {:key (str id) :value (name id)} label])]]]))))
 
 (defn code-badge [s]
   [:code
@@ -500,7 +685,7 @@
    s])
 
 (defn notebook-panel []
-  (let [{:keys [cells]} @repl-state]
+  (let [{:keys [cells]} (active-tab)]
     [:div
      {:style
       {:background "white"
@@ -604,24 +789,19 @@
     [:div
      {:style
       {:display "flex"
-       :justify-content "space-between"
-       :align-items "flex-start"
-       :margin-bottom "20px"}}
+       :align-items "center"
+       :gap "12px"
+       :margin-bottom "12px"
+       :flex-wrap "wrap"}}
      [:h1
       {:style
        {:font-size "20px"
         :font-weight "700"
-        :color "#111827"}}
+        :color "#111827"
+        :margin 0}}
       "DataScript Playground"]
-     [:div
-      {:style
-       {:display "flex"
-        :align-items "center"
-        :gap "8px"}}
-      [:span
-       {:style {:font-size "13px" :color "#6b7280"}}
-       "Load example:"]
-      [example-selector]]]
+     [:div {:style {:flex 1}}]
+     [tabs-bar]]
     [:div
      {:style
       {:display "grid"
@@ -645,6 +825,32 @@
 (defn ^:dev/after-load re-render []
   (rdom/render @root [app]))
 
+(defn- load-saved-state! []
+  (when-let [saved (load-from-storage)]
+    (let [all-cell-ids (->> (:tabs saved) (mapcat :cells) (map :id) (filter int?))]
+      (when (seq all-cell-ids)
+        (reset! next-id (apply max all-cell-ids))))
+    (let [all-tab-ids (->> (:tabs saved) (map :id) (filter int?))]
+      (when (seq all-tab-ids)
+        (reset! next-tab-id (apply max all-tab-ids))))
+    (let [active-id (:active-tab-id saved)
+          active (first (filter (fn [t] (= (:id t) active-id)) (:tabs saved)))]
+      (when active
+        (reset! conn (if-let [snap (:db-snapshot active)]
+                       (snapshot->conn snap)
+                       (ds/create-conn)))))
+    (reset! tabs-state
+            (update saved :tabs
+                    (fn [tabs]
+                      (mapv (fn [tab]
+                              (update tab :cells
+                                      (fn [cells]
+                                        (mapv (fn [{:keys [id code]}]
+                                                {:id id :code code :result nil :error nil})
+                                              cells))))
+                            tabs))))))
+
 (defn init []
+  (load-saved-state!)
   (reset! root (rdom/create-root (.getElementById js/document "app")))
   (re-render))
