@@ -244,7 +244,10 @@
                          (filter (fn [s] (= (:id s) set-id)))
                          first)]
     (mapv (fn [{:keys [label code]}]
-            (new-cell (format-code (str ";; " label "\n" code))))
+            (let [label-comment (->> (str/split-lines label)
+                                     (map (fn [l] (str ";; " l)))
+                                     (str/join "\n"))]
+              (new-cell (format-code (str label-comment "\n" code)))))
           (:examples example-set))))
 
 (defn switch-tab! [tab-id]
