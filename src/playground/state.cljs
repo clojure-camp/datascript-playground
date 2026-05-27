@@ -369,5 +369,10 @@
                                                   {:id id :code code :result nil :error nil})
                                                 cells))))
                               tabs)))))
-    (let [friends (->> examples/sets (filter (fn [s] (= (:id s) :friends))) first)]
-      (swap! tabs-state assoc :tabs [{:id 1 :label (:label friends) :cells (cells-for-set :friends)}]))))
+    (let [default-label :social
+          default (->> examples/sets
+                       (filter (fn [s] (= (:id s) default-label)))
+                       first)]
+      (swap! tabs-state assoc :tabs [{:id 1
+                                      :label (:label default)
+                                      :cells (cells-for-set :friends)}]))))
