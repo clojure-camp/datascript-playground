@@ -369,10 +369,10 @@
                                                   {:id id :code code :result nil :error nil})
                                                 cells))))
                               tabs)))))
-    (let [default-label :social
+    (let [default-id :social
           default (->> examples/sets
-                       (filter (fn [s] (= (:id s) default-label)))
+                       (filter (fn [s] (= (:id s) default-id)))
                        first)]
       (swap! tabs-state assoc :tabs [{:id 1
                                       :label (:label default)
-                                      :cells (cells-for-set :friends)}]))))
+                                      :cells (cells-for-set default-id)}]))))
